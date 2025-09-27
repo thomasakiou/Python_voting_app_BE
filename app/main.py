@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from .api import user_routes as users, candidate_routes as candidates, office_routes as offices, vote_routes as votes, result_routes as results
+from .api import user_routes as users, candidate_routes as candidates, office_routes as offices, vote_routes as votes, result_routes as results, config_route as config
 from .api.auth import reset_password as reset, change_password as change, login, logout
 from .domain import user as models
 from .core.database import engine
@@ -23,7 +23,7 @@ app.add_middleware(
 )
 
 
-@app.get("/")
+@app.get("/app")
 def root():
     return {"message": "API is running"}
 
@@ -45,3 +45,4 @@ app.include_router(candidates.router)
 app.include_router(offices.router)
 app.include_router(votes.router)
 app.include_router(results.router)
+app.include_router(config.router)

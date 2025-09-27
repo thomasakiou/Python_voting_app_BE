@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..core import database, oauth2
 from ..schemas import office as schemas
+from ..core.config import settings
 from ..core.database import get_db
 from ..application.commands.office.create_office import CreateOfficeCommand, CreateOfficeHandler
 from ..application.commands.office.delete_office import DeleteOfficeCommand, DeleteOfficeHandler
@@ -12,7 +13,7 @@ from ..application.queries.office.get_office_by_code import GetOfficeByCodeQuery
 import io, csv
 
 
-router = APIRouter(prefix="/offices", tags=["Offices"])
+router = APIRouter(prefix=f"{settings.api_prefix}/offices", tags=["Offices"])
 
 # ==========================
 # CREATE OFFICE

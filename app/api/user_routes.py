@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..core import database, oauth2
 from ..schemas import user as schemas
+from ..core.config import settings
 from ..core.database import get_db
 from ..application.commands.user.create_user import CreateUserCommand, CreateUserHandler, ImportVotersCommand, ImportVotersHandler
 from ..application.commands.user.delete_user import DeleteUserCommand, DeleteUserHandler
@@ -11,7 +12,7 @@ from ..application.queries.user.get_user_by_username import GetUserByUsernameQue
 import io, csv
 
 
-router = APIRouter(prefix="/users", tags=["Users"])
+router = APIRouter(prefix=f"{settings.api_prefix}/users", tags=["Users"])
 
 # ==========================
 # CREATE USER (ADMIN)

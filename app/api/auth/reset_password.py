@@ -2,10 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security.oauth2 import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from ...core import database, utils, oauth2, config
+from ...core.config import settings
 from ...domain import user as models
 from ...schemas import user as schemas, change_password as change_password_schemas
 
-router = APIRouter(tags=["Reset Password"])
+router = APIRouter(prefix="/api", tags=["Reset Password"])
 
 # ===============================
 # RESET PASSWORD

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from ..core import database, oauth2
 from ..schemas import candidate as schemas
+from ..core.config import settings
 from ..core.database import get_db
 from fastapi import APIRouter, Depends
 from typing import List
@@ -14,7 +15,7 @@ from ..application.commands.candidate.update_candidate import UpdateCandidateCom
 
 
 
-router = APIRouter(prefix="/candidates", tags=["Candidates"])
+router = APIRouter(prefix=f"{settings.api_prefix}/candidates", tags=["Candidates"])
 
 # ==========================
 # CREATE CANDIDATES

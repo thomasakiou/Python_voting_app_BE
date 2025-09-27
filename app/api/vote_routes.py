@@ -58,17 +58,6 @@ def get_vote_by_user_id(userId: int, db: Session = Depends(get_db), current_user
             return handler.handle(query)
         # Return all votes if no userId
         return db.query(Vote).all()
-    # query = GetVoterByIdQuery(userId=user_id)
-    # handler = GetVoterByIdHandler(db)
-    # return handler.handle(query)
-
-# @router.get("/", response_model=list[VoteResponse])
-# def get_votes(userId: Optional[int] = Query(None), db: Session = Depends(get_db), current_user=Depends(oauth2.role_required(["super-admin", "admin"]))):
-#     query = db.query(Vote)
-#     if userId:
-#         query = query.filter(Vote.user_id == userId)  # Filter by user ID if provided
-#     votes = query.all()
-#     return votes
 
 
 

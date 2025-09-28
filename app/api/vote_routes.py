@@ -11,6 +11,7 @@ from ..application.commands.vote.create_vote import CastVoteHandler
 from ..application.queries.vote.get_all_votes import ListVotesHandler, ListVotesQuery
 from ..application.queries.vote.get_voter_by_username import GetVoterByCodeHandler, GetVoterByCodeQuery
 from ..application.queries.vote.get_voters_by_id import GetVoterByIdHandler, GetVoterByIdQuery
+from ..application.queries.vote.get_votes_by_cand_code import GetVoterByCandidateCodeHandler, GetVoterByCandidateCodeQuery
 from ..core import database, oauth2
 from ..schemas.vote import VoteCreate, VoteResponse
 
@@ -71,3 +72,11 @@ def get_vote_by_user(username: str, db: Session = Depends(get_db), current_user=
     return handler.handle(query)
 
 
+# ==========================
+# GET VOTES BY CANDIDATE CODE
+# ==========================
+@router.get("/code/{code}", response_model=list[VoteResponse])
+def get_vote_by_code(code: str, db: Session = Depends(get_db), current_user=Depends(oauth2.role_required(["super-admin", "admin"]))):
+    query = GetVoterByCandidateCodeQuery(candCode=code)
+    handler = GetVoterByCandidateCodeHandler(db)
+    return handler.handle(query)

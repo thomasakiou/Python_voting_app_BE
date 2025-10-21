@@ -44,7 +44,7 @@ class Settings(BaseSettings):
             return f"http://{self.backend_host}:{self.backend_port}/api"
         else:
             # Uses the domain where the backend is hosted
-            return f"{os.getenv('API_BASE_URL', 'http://vmi2848672.contaboserver.net:8100')}/api"
+            return f"{os.getenv('API_BASE_URL', 'https://vmi2848672.contaboserver.net:8100')}/api"
 
 settings = Settings()
 

@@ -6,7 +6,7 @@ from ...core.config import settings
 from ...domain import user as models
 from ...schemas import user as schemas, change_password as change_password_schemas
 
-router = APIRouter(prefix="/api", tags=["Reset Password"])
+router = APIRouter(tags=["Reset Password"])
 
 # ===============================
 # RESET PASSWORD

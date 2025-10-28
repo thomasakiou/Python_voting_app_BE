@@ -10,7 +10,19 @@ from fastapi.middleware.cors import CORSMiddleware
 
 models.Base.metadata.create_all(bind=engine)
 
-app = FastAPI()
+app = FastAPI(
+    # title="Voting API",
+    # docs_url="/docs",  # explicitly set docs URL
+    # openapi_url="/openapi.json",  # explicitly set OpenAPI URL
+    # root_path="/api"  # set the root path
+    title="Python Voting API",
+    docs_url="/docs",
+    openapi_url="/openapi.json",
+    root_path="/api",
+)
+
+
+
 
 origins = ["*"]
 
@@ -18,13 +30,23 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods={"*"},
-    allow_headers={"*"},
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+
+# Root endpoint
+@app.get("/")
+def root():
+    return {
+        "message": "Welcome to Voting API",
+        "version": "1.0",
+        "docs_url": "/docs",
+        "status": "running"
+    }
 
 
 @app.get("/app")
-def root():
+def app_status():
     return {"message": "API is running"}
 
 

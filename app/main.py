@@ -37,6 +37,8 @@ def auto_upgrade_schema():
         "ALTER TABLE votes ADD COLUMN IF NOT EXISTS receipt_hash VARCHAR(64);",
         "ALTER TABLE voting_times ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE voting_times ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'NOT_STARTED';",
+        "ALTER TABLE voting_times ALTER COLUMN start_time DROP NOT NULL;",
+        "ALTER TABLE voting_times ALTER COLUMN end_time DROP NOT NULL;",
         "ALTER TABLE otps ADD COLUMN IF NOT EXISTS purpose VARCHAR(32) DEFAULT 'login';",
         "ALTER TABLE otps ADD COLUMN IF NOT EXISTS temp_email VARCHAR(255);",
         "ALTER TABLE otps ADD COLUMN IF NOT EXISTS temp_phone VARCHAR(32);",

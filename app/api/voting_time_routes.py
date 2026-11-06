@@ -16,11 +16,12 @@ router = APIRouter(prefix=f"{settings.api_prefix}/voting-time", tags=["Voting Ti
 def get_or_create_voting_time(db: Session) -> vt_models.VotingTime:
     record = db.query(vt_models.VotingTime).first()
     if not record:
+        now = datetime.now(timezone.utc)
         record = vt_models.VotingTime(
             is_active=False,
             status="NOT_STARTED",
-            start_time=None,
-            end_time=None,
+            start_time=now,
+            end_time=now,
         )
         db.add(record)
         db.commit()

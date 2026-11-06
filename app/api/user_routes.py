@@ -160,10 +160,18 @@ def export_voters_pdf(
     """
     Download a professional PDF document containing all voters and their statuses.
     """
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import letter, landscape
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import letter, landscape
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    except ImportError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="PDF generation library 'reportlab' is missing. Please run 'pip install reportlab' on the server."
+        )
+
+    import html
 
     voters = (
         db.query(User)
@@ -237,11 +245,16 @@ def export_voters_pdf(
         status_color = "#16a34a" if v.is_active else "#dc2626"
         accredited_color = "#16a34a" if v.is_accredited else "#eab308"
 
+        username_safe = html.escape(str(v.username or ""))
+        fullname_safe = html.escape(str(v.full_name or ""))
+        phone_safe = html.escape(str(v.phone or "-"))
+        email_safe = html.escape(str(v.email or "-"))
+
         data.append([
-            Paragraph(v.username, cell_style),
-            Paragraph(v.full_name, cell_style),
-            Paragraph(v.phone or "-", cell_style),
-            Paragraph(v.email or "-", cell_style),
+            Paragraph(username_safe, cell_style),
+            Paragraph(fullname_safe, cell_style),
+            Paragraph(phone_safe, cell_style),
+            Paragraph(email_safe, cell_style),
             Paragraph(f"<font color='{accredited_color}'><b>{'YES' if v.is_accredited else 'NO'}</b></font>", cell_style),
             Paragraph(f"<font color='{status_color}'><b>{'ACTIVE' if v.is_active else 'DISABLED'}</b></font>", cell_style),
             Paragraph(eligibility, cell_style),

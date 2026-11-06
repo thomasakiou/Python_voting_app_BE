@@ -14,19 +14,31 @@ router = APIRouter(prefix=f"{settings.api_prefix}/voting-time", tags=["Voting Ti
 
 
 def get_or_create_voting_time(db: Session) -> vt_models.VotingTime:
-    record = db.query(vt_models.VotingTime).first()
-    if not record:
+    try:
+        record = db.query(vt_models.VotingTime).first()
+        if not record:
+            now = datetime.now(timezone.utc)
+            record = vt_models.VotingTime(
+                is_active=False,
+                status="NOT_STARTED",
+                start_time=now,
+                end_time=now,
+            )
+            db.add(record)
+            db.commit()
+            db.refresh(record)
+        return record
+    except Exception as e:
+        db.rollback()
+        print(f"[get_or_create_voting_time error]: {e}")
         now = datetime.now(timezone.utc)
-        record = vt_models.VotingTime(
+        return vt_models.VotingTime(
+            id=1,
             is_active=False,
             status="NOT_STARTED",
             start_time=now,
             end_time=now,
         )
-        db.add(record)
-        db.commit()
-        db.refresh(record)
-    return record
 
 
 # ============================================================
@@ -38,43 +50,58 @@ def check_voting_status(db: Session = Depends(get_db)):
     Public endpoint to check if election voting is active, scheduled, or stopped.
     Cached for high concurrency.
     """
-    cached_status = cache.get("voting_status")
-    if cached_status:
-        return cached_status
+    try:
+        cached_status = cache.get("voting_status")
+        if cached_status:
+            return cached_status
 
-    record = get_or_create_voting_time(db)
-    now = datetime.now(timezone.utc)
+        record = get_or_create_voting_time(db)
+        now = datetime.now(timezone.utc)
 
-    # If scheduled end_time passed, auto-mark stopped
-    if record.end_time and record.is_active:
-        end_time = record.end_time
-        if end_time.tzinfo is None:
-            end_time = end_time.replace(tzinfo=timezone.utc)
-        if now > end_time:
-            record.is_active = False
-            record.status = "STOPPED"
-            db.commit()
+        # If scheduled end_time passed, auto-mark stopped
+        if record.end_time and record.is_active:
+            end_time = record.end_time
+            if end_time.tzinfo is None:
+                end_time = end_time.replace(tzinfo=timezone.utc)
+            if now > end_time:
+                record.is_active = False
+                record.status = "STOPPED"
+                try:
+                    db.commit()
+                except Exception:
+                    db.rollback()
 
-    time_remaining = None
-    if record.is_active and record.end_time:
-        end_time = record.end_time
-        if end_time.tzinfo is None:
-            end_time = end_time.replace(tzinfo=timezone.utc)
-        time_remaining = max(0, int((end_time - now).total_seconds()))
+        time_remaining = None
+        if record.is_active and record.end_time:
+            end_time = record.end_time
+            if end_time.tzinfo is None:
+                end_time = end_time.replace(tzinfo=timezone.utc)
+            time_remaining = max(0, int((end_time - now).total_seconds()))
 
-    out = schemas.VotingTimeOut(
-        id=record.id,
-        start_time=record.start_time,
-        end_time=record.end_time,
-        created_at=record.created_at,
-        updated_at=record.updated_at,
-        is_active=record.is_active,
-        status=record.status,
-        time_remaining=time_remaining,
-        message="Voting is currently in progress." if record.is_active else "Voting is closed.",
-    )
-    cache.set("voting_status", out, ttl_seconds=3)
-    return out
+        out = schemas.VotingTimeOut(
+            id=record.id,
+            start_time=record.start_time,
+            end_time=record.end_time,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+            is_active=record.is_active,
+            status=record.status,
+            time_remaining=time_remaining,
+            message="Voting is currently in progress." if record.is_active else "Voting is closed.",
+        )
+        cache.set("voting_status", out, ttl_seconds=3)
+        return out
+    except Exception as e:
+        print(f"[check_voting_status error]: {e}")
+        return schemas.VotingTimeOut(
+            id=1,
+            start_time=None,
+            end_time=None,
+            is_active=False,
+            status="NOT_STARTED",
+            time_remaining=None,
+            message="Voting is closed.",
+        )
 
 
 # ============================================================

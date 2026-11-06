@@ -13,7 +13,7 @@ router = APIRouter(prefix=f"{settings.api_prefix}/results", tags=["Results"])
 def count_votes(
     office_code: str,
     db: Session = Depends(get_db),
-    current_user=Depends(oauth2.role_required(["super-admin", "admin"]))
+    current_user=Depends(oauth2.role_required(["super-admin", "admin", "voter"]))
 ):
     query = CountVotesQuery(office_code=office_code)
     handler = CountVotesHandler(db)

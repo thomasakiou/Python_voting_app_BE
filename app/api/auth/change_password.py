@@ -7,7 +7,7 @@ from ...domain import user as models
 from ...schemas import user as schemas, change_password as change_password_schemas
 
 
-router = APIRouter(prefix="/api", tags=["Change Password"])
+router = APIRouter(tags=["Change Password"])
 
 
 # ===============================

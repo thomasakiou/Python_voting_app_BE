@@ -32,12 +32,19 @@ class CastVoteHandler:
         if not office:
             raise HTTPException(status_code=404, detail="Office not found")
         
-        # 3. Get user
+                # 3. Get user
         user = self.db.query(users.User).filter(
             users.User.id == command.user_id
         ).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
+
+        # 3. Get active user
+        user = self.db.query(users.User).filter(
+            users.User.id == command.user_id, users.User.is_active == True
+        ).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="Your account has been disabled for voting. Please contact an administrator.")
 
 
         if candidate.office_code != office.office_code:

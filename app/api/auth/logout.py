@@ -7,7 +7,7 @@ from ...domain import user as models
 from ...schemas import logout as out
 from fastapi import APIRouter, Depends, Response
 
-router = APIRouter(prefix="/api", tags=["Logout"])
+router = APIRouter(tags=["Logout"])
 
 
 @router.post("/logout")

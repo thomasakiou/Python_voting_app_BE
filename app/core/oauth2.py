@@ -1,5 +1,6 @@
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
+from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from ..schemas import user as schemas, token as tokenData
@@ -15,14 +16,24 @@ ALGORITHM = settings.algorithm
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 
 
-def create_access_token(data: dict):
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
     
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        role = to_encode.get("role")
+        if role in ("admin", "super-admin"):
+            # 24 hours (1440 minutes) for admins to monitor the election without session expiration
+            admin_minutes = getattr(settings, "admin_token_expire_minutes", 1440)
+            expire = datetime.utcnow() + timedelta(minutes=admin_minutes)
+        else:
+            # 2 hours for voters
+            voter_minutes = max(getattr(settings, "access_token_expire_minutes", 120), 120)
+            expire = datetime.utcnow() + timedelta(minutes=voter_minutes)
+    
     to_encode.update({"exp": expire})
-    
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    
     return encoded_jwt
 
 
@@ -42,13 +53,15 @@ def verify_access_token(token: str, credentials_exception):
 
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    credentials_exception = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                                          detail=f"Could not validate credentials",
-                                          headers={"WWW-Authenticate": "Bearer"})
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
     token_data = verify_access_token(token, credentials_exception)
     user = db.query(models.User).filter(models.User.id == token_data.id).first()
     if not user:
-       raise credentials_exception
+        raise credentials_exception
     return user
 
 

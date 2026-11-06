@@ -9,7 +9,8 @@ class Settings(BaseSettings):
     database_username: str
     secret_key: str
     algorithm: str
-    access_token_expire_minutes: int
+    access_token_expire_minutes: int = 120
+    admin_token_expire_minutes: int = 1440
     api_base_url: str = "http://localhost:8000/api"
     backend_host: str = "localhost"
     backend_port: str = "8000"

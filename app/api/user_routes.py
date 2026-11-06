@@ -8,8 +8,16 @@ from ..application.commands.user.create_user import CreateUserCommand, CreateUse
 from ..application.commands.user.delete_user import DeleteUserCommand, DeleteUserHandler
 from ..application.queries.user.get_all_users import ListUsersQuery, ListUsersHandler
 from ..application.queries.user.get_user_by_username import GetUserByUsernameQuery, GetUserByUsernameHandler
+from ..application.commands.user.toggle_active_user import ToggleUserStatusCommand, ToggleUserStatusHandler
+from ..application.commands.user.disable_enable_voters import(
+    DisableAllVotersCommand,
+    DisableAllVotersHandler,
+    EnableAllVotersCommand,
+    EnableAllVotersHandler
+)
 
 import io, csv
+from typing import Optional
 
 
 router = APIRouter(prefix=f"{settings.api_prefix}/users", tags=["Users"])
@@ -86,12 +94,18 @@ def upload_voters_csv(
     voters = []
     try:
         for row in reader:
+            # Skip empty rows (rows where username is empty or whitespace)
+            username = row.get("username", "").strip()
+            if not username:
+                continue
+                
             voters.append({
-                "username": row["username"],
-                "full_name": row.get("full_name", ""),
-                "phone": row.get("phone"),
-                "role": row.get("role"),
-                "password": row.get("password")
+                "username": username,
+                "full_name": row.get("full_name", "").strip(),
+                "phone": row.get("phone", "").strip(),
+                "email": row.get("email", "").strip() or None,
+                "role": row.get("role", "voter").strip(),
+                "password": row.get("password", "").strip()
             })
     except KeyError as e:
         raise HTTPException(
@@ -101,11 +115,16 @@ def upload_voters_csv(
 
     command = ImportVotersCommand(voters=voters)
     handler = ImportVotersHandler(db)
-    created = handler.handle(command)
+    result = handler.handle(command)
+
+    created = result["created"]
+    skipped = result["skipped"]
 
     return {
         "created": len(created),
-        "users": [u.username for u in created]
+        "created_usernames": [u.username for u in created],
+        "skipped": len(skipped),
+        "skipped_details": skipped,
     }
 
 
@@ -125,8 +144,22 @@ def get_all_users(db: Session = Depends(get_db),
 # GET USER BY USERNAME
 # ==========================
 @router.get("/{username}", response_model=schemas.UserOut)
-def get_user(name: str, db: Session = Depends(get_db), current_user=Depends(oauth2.role_required(["super-admin", "admin"]))):
-    query = GetUserByUsernameQuery(username=name)
+def get_user(
+    username: str,
+    name: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin", "voter"])),
+):
+    if current_user.role == "voter":
+        own_identifiers = {str(current_user.id), current_user.username}
+        if username not in own_identifiers or (name is not None and name not in own_identifiers):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Voters may only view their own profile.",
+            )
+        return current_user
+
+    query = GetUserByUsernameQuery(username=name or username)
     handler = GetUserByUsernameHandler(db)
     return handler.handle(query)
 
@@ -136,7 +169,8 @@ def get_user(name: str, db: Session = Depends(get_db), current_user=Depends(oaut
 # DELETE USER BY ID
 # ==========================
 @router.delete("/{id}")
-def delete_user(id: int, db: Session = Depends(get_db), current_user=Depends(oauth2.role_required(["super-admin"]))):
+def delete_user(id: int, db: Session = Depends(get_db), 
+current_user=Depends(oauth2.role_required(["super-admin"]))):
     command = DeleteUserCommand(user_id=id)
     handler = DeleteUserHandler(db)
     return handler.handle(command)
@@ -154,5 +188,46 @@ def delete_user(id: int, db: Session = Depends(get_db), current_user=Depends(oau
 
 
 
+# ===============================
+# TOGGLE USER FIELD (is_active)
+# ===============================
+@router.patch("/{user_id}/status", response_model=schemas.UserOut)
+def toggle_active_status(
+    user_id: int,
+    is_active: bool,  
+    db: Session = Depends(database.get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"]))
+):
+    command = ToggleUserStatusCommand(
+        user_id=user_id,
+        is_active=is_active,
+        # updated_by=current_user.id
+    )
+    handler = ToggleUserStatusHandler(db)
+    return handler.handle(command)
 
 
+# ===============================
+# DISABLE USER (voters)
+# ===============================
+@router.patch("/disable-voters")
+def disable_all_voters(
+    db: Session = Depends(database.get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"]))
+):
+    command = DisableAllVotersCommand()
+    handler = DisableAllVotersHandler(db)
+    return handler.handle(command)
+
+
+# ===============================
+# ENABLE USER (voters)
+# ===============================
+@router.patch("/enable-voters")
+def enable_all_voters(
+    db: Session = Depends(database.get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"]))
+):
+    command = EnableAllVotersCommand()
+    handler = EnableAllVotersHandler(db)
+    return handler.handle(command)

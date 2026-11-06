@@ -46,7 +46,7 @@ async def login(request: Request, user_credentials: OAuth2PasswordRequestForm = 
     #create token
     access_token = oauth2.create_access_token(data={"user_id": str(user.id), "role": user.role})
     #return token
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token, "token_type": "bearer", "fullname": user.full_name}
 
 
 

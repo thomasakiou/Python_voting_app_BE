@@ -10,6 +10,7 @@ from typing import List
 class Token(BaseModel):
     access_token: str
     token_type: str
+    fullname: str
 
 
 class TokenData(BaseModel):

@@ -11,11 +11,25 @@ class Settings(BaseSettings):
     secret_key: str
     algorithm: str
     access_token_expire_minutes: int
-    api_base_url: str 
-    # = "https://vmi2848672.contaboserver.net/voting"  # Add this line
-    backend_host: str 
-    backend_port: str 
-    environment: str 
+    api_base_url: str
+    backend_host: str
+    backend_port: str
+    environment: str
+
+    # SMTP (Email) settings
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_sender_email: str = ""
+
+    # Twilio (SMS) settings
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_phone_number: str = ""
+
+    # OTP settings
+    otp_expire_minutes: int = 10
 
 
     class Config:

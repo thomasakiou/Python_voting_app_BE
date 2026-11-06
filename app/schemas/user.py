@@ -16,16 +16,18 @@ class UserRole(str, PyEnum):
 # USER SCHEMA
 # ===============================================================================================
 class UserBase(BaseModel):
-    # email: EmailStr
     username: str
     full_name: str
     phone: Optional[str] = None
-    # role: UserRole   # 'admin','voter'
-    
+    email: Optional[str] = None
+
 
 class UserCreate(BaseModel):
     username: str
     password: str
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
     class config:
         orm_mode = True
 
@@ -40,5 +42,7 @@ class UserOut(UserBase):
     id: int
     username: str
     role: UserRole   # 'admin','voter'
+    is_active: Optional[bool] = True
+    email: Optional[str] = None
     class config:
         orm_mode = True

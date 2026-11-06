@@ -18,10 +18,42 @@ from .domain import audit_log as audit_models
 from .core.database import engine
 from .core import database
 from .core.init_super_admin import init_super_admin
+from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
 
 
+def auto_upgrade_schema():
+    """
+    Ensures newly added columns and tables exist on PostgreSQL without requiring manual migrations.
+    Uses IF NOT EXISTS so it is completely safe and idempotent.
+    """
+    try:
+        with engine.begin() as conn:
+            statements = [
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR;",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_accredited BOOLEAN DEFAULT FALSE;",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS accredited_at TIMESTAMP WITH TIME ZONE;",
+                "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS is_disqualified BOOLEAN DEFAULT FALSE;",
+                "ALTER TABLE offices ADD COLUMN IF NOT EXISTS is_disqualified BOOLEAN DEFAULT FALSE;",
+                "ALTER TABLE votes ADD COLUMN IF NOT EXISTS receipt_hash VARCHAR(64);",
+                "ALTER TABLE voting_times ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE;",
+                "ALTER TABLE voting_times ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'NOT_STARTED';",
+                "ALTER TABLE otps ADD COLUMN IF NOT EXISTS purpose VARCHAR(32) DEFAULT 'login';",
+                "ALTER TABLE otps ADD COLUMN IF NOT EXISTS temp_email VARCHAR(255);",
+                "ALTER TABLE otps ADD COLUMN IF NOT EXISTS temp_phone VARCHAR(32);",
+            ]
+            for stmt in statements:
+                try:
+                    conn.execute(text(stmt))
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[Schema Upgrade Notice] {e}")
+
+
 models.Base.metadata.create_all(bind=engine)
+auto_upgrade_schema()
 
 app = FastAPI(
     title="NECO MCS Voting API",

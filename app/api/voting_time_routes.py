@@ -93,6 +93,7 @@ def start_voting(
     record.is_active = True
     record.status = "ACTIVE"
     record.start_time = now
+    record.end_time = None
     db.commit()
     db.refresh(record)
 

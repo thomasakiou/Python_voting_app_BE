@@ -1,99 +1,116 @@
 from dataclasses import dataclass
+from typing import List, Optional
 from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
+
 from ....domain import user as models
 from ....core import utils, config
-import csv
-from fastapi import HTTPException, status
-from ....domain import user as models
-from ....core import utils
-from dataclasses import dataclass
-from typing import List
+
 
 @dataclass(frozen=True)
 class CreateUserCommand:
     full_name: str
     username: str
     password: str
-    phone: str
-    role: str
-    must_change_password: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    role: str = "voter"
+    must_change_password: bool = True
+
 
 class CreateUserHandler:
-    def __init__(self, db):
+    def __init__(self, db: Session):
         self.db = db
 
     def handle(self, command: CreateUserCommand):
-        existing = self.db.query(models.User).filter(models.User.username.ilike("%{command.username}%")).first()
+        existing = (
+            self.db.query(models.User)
+            .filter(models.User.username == command.username.strip())
+            .first()
+        )
         if existing:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Username '{command.username}' already exists",
+            )
 
-        # hashed_password = utils.hash_password(config.DEFAULT_ADMIN_PASSWORD)
         hashed_password = utils.hash_password(command.password)
 
-        new_user = models.User(username=command.username, 
-                               full_name=command.full_name, 
-                               password=hashed_password,
-                               phone=command.phone,
-                               role = command.role, 
-                               must_change_password=command.must_change_password)
+        new_user = models.User(
+            username=command.username.strip(),
+            full_name=command.full_name.strip(),
+            password=hashed_password,
+            phone=command.phone.strip() if command.phone else None,
+            email=command.email.strip().lower() if command.email else None,
+            role=command.role,
+            is_active=True,
+            is_accredited=False,
+            must_change_password=command.must_change_password,
+        )
         self.db.add(new_user)
         self.db.commit()
         self.db.refresh(new_user)
         return new_user
-    
 
 
 @dataclass(frozen=True)
 class ImportVotersCommand:
-    voters: List[dict]  # each dict: {username, full_name, phone, role, password}
-
+    voters: List[dict]  # each dict: {username, full_name, phone, email, role, password}
 
 
 class ImportVotersHandler:
-    def __init__(self, db):
+    def __init__(self, db: Session):
         self.db = db
 
     def handle(self, command: ImportVotersCommand):
         created_users = []
-        skipped = []  # list of {username, reason}
+        skipped = []
 
         for voter in command.voters:
-            username = voter["username"]
+            username = str(voter["username"]).strip()
+            if not username:
+                continue
 
-            # ── Check for duplicate username
-            existing_username = self.db.query(models.User).filter(
-                models.User.username == username
-            ).first()
+            existing_username = (
+                self.db.query(models.User)
+                .filter(models.User.username == username)
+                .first()
+            )
             if existing_username:
                 skipped.append({"username": username, "reason": "Username already exists"})
                 continue
 
-            # ── Check for duplicate email (only if email provided)
-            email = voter.get("email") or None
+            email = voter.get("email")
+            email = email.strip().lower() if email else None
             if email:
-                existing_email = self.db.query(models.User).filter(
-                    models.User.email == email
-                ).first()
+                existing_email = (
+                    self.db.query(models.User)
+                    .filter(models.User.email == email)
+                    .first()
+                )
                 if existing_email:
-                    skipped.append({"username": username, "reason": f"Email '{email}' already belongs to another user"})
+                    skipped.append({
+                        "username": username,
+                        "reason": f"Email '{email}' already belongs to another user"
+                    })
                     continue
 
-            hashed_password = utils.hash(voter.get("password", "Vote@123"))
+            phone = voter.get("phone")
+            phone = phone.strip() if phone else None
 
-            role = voter.get("role", "voter")
-            if role != "voter":
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid role '{role}' for username '{username}'. Only 'voter' role is allowed for CSV import.",
-                )
+            default_pw = voter.get("password") or config.DEFAULT_VOTER_PASSWORD
+            hashed_password = utils.hash_password(default_pw)
+            role = voter.get("role", "voter").strip()
 
             new_user = models.User(
                 username=username,
-                full_name=voter.get("full_name", ""),
-                phone=voter.get("phone"),
+                full_name=voter.get("full_name", "").strip(),
+                phone=phone,
                 email=email,
                 password=hashed_password,
                 role=role,
+                is_active=True,
+                is_accredited=False,
                 must_change_password=True,
             )
             self.db.add(new_user)

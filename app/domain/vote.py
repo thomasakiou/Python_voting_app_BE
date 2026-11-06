@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, TIMESTAMP, Enum, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, TIMESTAMP, UniqueConstraint
 from sqlalchemy.sql.expression import text
 from ..core.database import Base
 from sqlalchemy.orm import relationship
@@ -16,6 +16,7 @@ class Vote(Base):
     office_name = Column(String, nullable=False)
     candidate_code = Column(String, ForeignKey("candidates.candidate_code", ondelete="CASCADE"))
     candidate_name = Column(String, nullable=False)
+    receipt_hash = Column(String(64), nullable=True)
 
     user = relationship("User", back_populates="votes")
     office = relationship("Office", back_populates="votes")

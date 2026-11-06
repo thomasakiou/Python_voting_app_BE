@@ -1,98 +1,138 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
+import logging
 
 from ...core import database, oauth2
 from ...core.config import settings
 from ...core.otp_utils import generate_otp, get_otp_expiry, send_otp_email, send_otp_sms
 from ...domain import user as user_models
 from ...domain import otp as otp_models
+from ...domain import voting_time as vt_models
 from ...schemas import otp as otp_schemas, token as token_schemas
 
-router = APIRouter(tags=["Login"])
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["Election Login"])
+
+
+def mask_email(email: str) -> str:
+    """Mask email for privacy, e.g. j***e@example.com."""
+    if not email or "@" not in email:
+        return email
+    parts = email.split("@")
+    name = parts[0]
+    domain = parts[1]
+    if len(name) <= 2:
+        masked_name = name[0] + "*"
+    else:
+        masked_name = name[0] + "*" * (len(name) - 2) + name[-1]
+    return f"{masked_name}@{domain}"
 
 
 # ============================================================
-# STEP 1 – INITIATE LOGIN (username + phone → send OTP)
+# STEP 1 – ELECTION LOGIN (username/MCS number → send 6-digit OTP)
 # ============================================================
 @router.post("/login", status_code=status.HTTP_200_OK)
+@router.post("/election/login", status_code=status.HTTP_200_OK)
 def initiate_login(
     credentials: otp_schemas.LoginRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(database.get_db),
 ):
     """
-    Accepts username + phone number.
-    Validates the user, generates a 6-digit OTP, and delivers it
-    via SMS (to the registered phone) and Email (if email is set).
+    On election day, voter enters their 4-digit MCS username and clicks validate.
+    Verifies eligibility, checks active election status, and sends a 6-digit OTP
+    to their registered email with header 'NECO MCS Voting'.
     """
-    # ── 1. Look up the user by username
+    username = credentials.username.strip()
+
+    # 1. Look up user by username
     user = (
         db.query(user_models.User)
-        .filter(user_models.User.username == credentials.username)
+        .filter(user_models.User.username == username)
         .first()
     )
     if not user:
-        # Generic message to avoid username enumeration
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid credentials",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Voter with MCS number '{username}' not found. Please verify your number.",
         )
 
-    # ── 2. Ensure only voters use this endpoint (admins use POST /admin/login)
+    # 2. Only voters use this endpoint
     if user.role in ("admin", "super-admin"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Administrators must log in via /admin/login using username and password.",
         )
 
-    # ── 3. Verify the supplied phone matches what is on file
-    if not user.phone or user.phone.strip() != credentials.phone.strip():
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid credentials",
-        )
-
-    # ── 3. Check the account is active
+    # 3. Check voter eligibility / active status
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your account is deactivated. Please contact the administrator.",
+            detail="You have been disqualified / Your account has been disabled. Please contact the administrator.",
         )
 
-    # ── 4. Invalidate any existing unused OTPs for this user
+    # 4. Check if voter has accredited
+    if not user.is_accredited:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not accredited for this election. Please complete voter accreditation first at /accreditation.",
+        )
+
+    # 5. Check user email
+    if not user.email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No registered email address found for your profile. Please contact the administrator.",
+        )
+
+    # 6. Check if election is open / voting has started
+    voting_record = db.query(vt_models.VotingTime).first()
+    if not voting_record or not voting_record.is_active or voting_record.status != "ACTIVE":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Voting is currently closed. Voting has not yet started or has been stopped by the administrator.",
+        )
+
+    # 7. Invalidate existing unused voting OTPs for this user
     db.query(otp_models.OTP).filter(
         otp_models.OTP.user_id == user.id,
+        otp_models.OTP.purpose == "voting",
         otp_models.OTP.is_used == False,  # noqa: E712
     ).update({"is_used": True})
     db.commit()
 
-    # ── 5. Generate OTP and persist it
-    otp_code = generate_otp()
+    # 8. Generate 6-digit OTP and persist
+    otp_code = generate_otp(6)
     otp_entry = otp_models.OTP(
         user_id=user.id,
         otp_code=otp_code,
+        purpose="voting",
         expires_at=get_otp_expiry(settings.otp_expire_minutes),
         is_used=False,
     )
     db.add(otp_entry)
     db.commit()
 
-    # ── 6. Deliver OTP via SMS and/or Email
-    sms_sent = send_otp_sms(user.phone, otp_code)
-    email_sent = send_otp_email(user.email, otp_code, user.full_name) if user.email else False
-
-    if not sms_sent and not email_sent:
-        # At least one channel must succeed
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to deliver OTP. Please try again later.",
-        )
+    # 9. Deliver OTP via BackgroundTasks with header 'NECO MCS Voting'
+    background_tasks.add_task(
+        send_otp_email,
+        recipient_email=user.email,
+        otp_code=otp_code,
+        full_name=user.full_name,
+        subject="NECO MCS Voting",
+        purpose_label="Voting Login",
+    )
+    if user.phone:
+        background_tasks.add_task(send_otp_sms, user.phone, otp_code)
 
     return {
-        "message": "OTP sent to your registered phone number"
-        + (" and email" if email_sent else "")
-        + ". Please enter it to complete login.",
+        "message": f"A 6-digit OTP has been sent to your registered email ({mask_email(user.email)}). Please enter it to access your ballot.",
         "otp_sent": True,
+        "masked_email": mask_email(user.email),
+        "username": user.username,
+        "full_name": user.full_name,
     }
 
 
@@ -108,30 +148,49 @@ def verify_otp(
     Accepts username + OTP code.
     If valid and not expired, returns a JWT access token.
     """
-    # ── 1. Look up the user
+    username = payload.username.strip()
+    otp_code = payload.otp_code.strip()
+
+    # 1. Look up user
     user = (
         db.query(user_models.User)
-        .filter(user_models.User.username == payload.username)
+        .filter(user_models.User.username == username)
         .first()
     )
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid OTP or username",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invalid username or OTP.",
         )
 
-    # ── 2. Check account is still active
+    # 2. Check account is active
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your account is deactivated.",
+            detail="You have been disqualified / Your account has been disabled.",
         )
 
-    # ── 3. Find the latest valid (unused) OTP for this user
+    # 3. Check user is accredited
+    if not user.is_accredited:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You must be accredited to log in for voting.",
+        )
+
+    # 4. Check election status
+    voting_record = db.query(vt_models.VotingTime).first()
+    if not voting_record or not voting_record.is_active or voting_record.status != "ACTIVE":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Voting has closed or is not currently open.",
+        )
+
+    # 5. Find the latest valid (unused) voting OTP for this user
     otp_entry = (
         db.query(otp_models.OTP)
         .filter(
             otp_models.OTP.user_id == user.id,
+            otp_models.OTP.purpose == "voting",
             otp_models.OTP.is_used == False,  # noqa: E712
         )
         .order_by(otp_models.OTP.created_at.desc())
@@ -140,14 +199,13 @@ def verify_otp(
 
     if not otp_entry:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="No active OTP found. Please request a new one.",
         )
 
-    # ── 4. Check expiry
+    # 6. Check expiry
     now = datetime.now(timezone.utc)
     otp_expires = otp_entry.expires_at
-    # Make timezone-aware if it's naive (PostgreSQL may return naive datetimes)
     if otp_expires.tzinfo is None:
         otp_expires = otp_expires.replace(tzinfo=timezone.utc)
 
@@ -155,22 +213,22 @@ def verify_otp(
         otp_entry.is_used = True
         db.commit()
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="OTP has expired. Please request a new one.",
         )
 
-    # ── 5. Verify OTP code
-    if otp_entry.otp_code != payload.otp_code.strip():
+    # 7. Verify OTP code
+    if otp_entry.otp_code != otp_code:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid OTP code.",
         )
 
-    # ── 6. Mark OTP as used
+    # 8. Mark OTP as used
     otp_entry.is_used = True
     db.commit()
 
-    # ── 7. Issue JWT access token
+    # 9. Issue JWT access token
     access_token = oauth2.create_access_token(
         data={"user_id": str(user.id), "role": user.role}
     )
@@ -179,4 +237,6 @@ def verify_otp(
         "access_token": access_token,
         "token_type": "bearer",
         "fullname": user.full_name,
+        "username": user.username,
+        "role": user.role,
     }

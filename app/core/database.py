@@ -3,16 +3,16 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from .config import settings
 
-
-# # Escape special characters in password
-# from urllib.parse import quote_plus
-# safe_password = quote_plus(settings.database_password)
-
 SQLALCHEMY_DATABASE_URL = settings.db_url
-# f'postgresql://{settings.database_username}:{safe_password}@{settings.database_hostname}:{settings.database_port}/{settings.database_name}'
 
-
-engine = create_engine(SQLALCHEMY_DATABASE_URL, echo=True)
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    pool_size=25,
+    max_overflow=35,
+    pool_timeout=30,
+    pool_pre_ping=True,
+    echo=False
+)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -23,5 +23,5 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
-    finally: 
+    finally:
         db.close()

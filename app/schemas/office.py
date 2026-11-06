@@ -1,36 +1,47 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
 
-# ===============================================================================================
-# OFFICE SCHEMA
-# ===============================================================================================
 class OfficeBase(BaseModel):
     office_code: str
     description: str
-    class config:
-        orm_mode = True
-  
+    is_disqualified: Optional[bool] = False
+
+    class Config:
+        from_attributes = True
+
 
 class OfficeCreate(OfficeBase):
-    # office_code: str
-    # description: str
-    class config:
-        orm_mode = True
+    class Config:
+        from_attributes = True
+
 
 class OfficeResponse(OfficeBase):
     id: int
     created_at: datetime
-    class config:
-        orm_mode = True
- 
-class OfficeUpdate(OfficeBase):
-    class config:
-        orm_mode = True
- 
+
+    class Config:
+        from_attributes = True
+
+
+class OfficeUpdate(BaseModel):
+    office_code: Optional[str] = None
+    description: Optional[str] = None
+    is_disqualified: Optional[bool] = None
+
+    class Config:
+        from_attributes = True
+
+
 class OfficeOut(BaseModel):
     office_code: str
     description: str
-    class config:
-       orm_mode = True
+    is_disqualified: Optional[bool] = False
+
+    class Config:
+        from_attributes = True
+
+
+class OfficeDisqualifyRequest(BaseModel):
+    is_disqualified: bool

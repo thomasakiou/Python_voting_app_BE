@@ -14,6 +14,7 @@ from ..core.audit import record_audit_log
 from ..core.cache import cache
 from ..domain.user import User
 from ..domain.vote import Vote
+from ..domain import otp as otp_models
 from ..application.commands.user.create_user import (
     CreateUserCommand,
     CreateUserHandler,
@@ -560,3 +561,88 @@ def enable_all_voters(
         admin_id=current_user.id,
     )
     return result
+
+
+# ============================================================
+# REVERSE VOTER ACCREDITATION (ADMIN)
+# ============================================================
+@router.patch("/{user_id}/reverse-accreditation", response_model=schemas.UserOut)
+def reverse_voter_accreditation(
+    user_id: int,
+    db: Session = Depends(database.get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
+):
+    """
+    Reverse accreditation for a voter so they can undergo accreditation again.
+    Resets is_accredited to False, clears accredited_at, and invalidates active OTPs.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Voter with ID {user_id} not found.",
+        )
+
+    if user.role != "voter":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Accreditation can only be reversed for voter accounts.",
+        )
+
+    # Check if voter has already cast votes in this election
+    has_voted = db.query(Vote).filter(Vote.user_id == user.id).first()
+    if has_voted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot reverse accreditation for voter '{user.username}' because they have already cast votes in this election.",
+        )
+
+    if not user.is_accredited:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Voter '{user.username}' ({user.full_name}) is not currently accredited.",
+        )
+
+    # Invalidate all prior accreditation OTPs
+    db.query(otp_models.OTP).filter(
+        otp_models.OTP.user_id == user.id,
+        otp_models.OTP.purpose == "accreditation",
+    ).update({"is_used": True})
+
+    # Reset accreditation fields
+    user.is_accredited = False
+    user.accredited_at = None
+    db.commit()
+    db.refresh(user)
+
+    cache.delete("voter_analysis")
+
+    record_audit_log(
+        db=db,
+        admin_username=current_user.username,
+        action="REVERSE_ACCREDITATION",
+        target_type="VOTER",
+        target_id=str(user.username),
+        details=f"Admin reversed accreditation for voter {user.username} ({user.full_name}) to allow re-accreditation",
+        admin_id=current_user.id,
+    )
+
+    return user
+
+
+@router.patch("/username/{username}/reverse-accreditation", response_model=schemas.UserOut)
+def reverse_voter_accreditation_by_username(
+    username: str,
+    db: Session = Depends(database.get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
+):
+    """
+    Reverse accreditation by voter MCS username.
+    """
+    user = db.query(User).filter(User.username == username.strip()).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Voter with MCS number '{username}' not found.",
+        )
+    return reverse_voter_accreditation(user_id=user.id, db=db, current_user=current_user)

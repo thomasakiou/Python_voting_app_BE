@@ -9,12 +9,14 @@ from .api import (
     voting_time_routes as voting_time,
     accreditation_routes as accreditation,
     audit_log_routes as audit_logs,
+    voter_contact_routes as voter_contact,
 )
 from .api.auth import otp_login, admin_login, logout
 from .domain import user as models
 from .domain import otp as otp_models
 from .domain import voting_time as vt_models
 from .domain import audit_log as audit_models
+from .domain import dispute as dispute_models
 from .core.database import engine
 from .core import database
 from .core.init_super_admin import init_super_admin
@@ -42,6 +44,23 @@ def auto_upgrade_schema():
         "ALTER TABLE otps ADD COLUMN IF NOT EXISTS purpose VARCHAR(32) DEFAULT 'login';",
         "ALTER TABLE otps ADD COLUMN IF NOT EXISTS temp_email VARCHAR(255);",
         "ALTER TABLE otps ADD COLUMN IF NOT EXISTS temp_phone VARCHAR(32);",
+        """CREATE TABLE IF NOT EXISTS voter_disputes (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            username VARCHAR(50) NOT NULL,
+            full_name VARCHAR(100) NOT NULL,
+            current_email VARCHAR(255),
+            current_phone VARCHAR(50),
+            requested_email VARCHAR(255),
+            requested_phone VARCHAR(50),
+            dispute_type VARCHAR(50) DEFAULT 'CONTACT_UPDATE' NOT NULL,
+            reason TEXT NOT NULL,
+            status VARCHAR(32) DEFAULT 'PENDING' NOT NULL,
+            admin_notes TEXT,
+            resolved_by VARCHAR(50),
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+            resolved_at TIMESTAMP WITH TIME ZONE
+        );""",
     ]
     try:
         with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
@@ -123,3 +142,4 @@ app.include_router(results.router)
 app.include_router(config.router)
 app.include_router(voting_time.router)
 app.include_router(audit_logs.router)
+app.include_router(voter_contact.router)

@@ -182,7 +182,7 @@ def verify_otp(
 
     # 3b. Enforce Device Binding
     if user.accredited_device_id:
-        client_device_id = (credentials.device_id or "").strip()
+        client_device_id = (payload.device_id or "").strip()
         if not client_device_id or client_device_id != user.accredited_device_id:
             device_desc = user.device_info or "the device used during accreditation"
             raise HTTPException(

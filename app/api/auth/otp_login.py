@@ -5,7 +5,14 @@ import logging
 
 from ...core import database, oauth2
 from ...core.config import settings
-from ...core.otp_utils import generate_otp, get_otp_expiry, send_otp_email, send_otp_sms
+from ...core.otp_utils import (
+    generate_otp,
+    get_otp_expiry,
+    send_otp_email,
+    send_otp_sms,
+    mask_email,
+    mask_phone,
+)
 from ...domain import user as user_models
 from ...domain import otp as otp_models
 from ...domain import voting_time as vt_models
@@ -14,20 +21,6 @@ from ...schemas import otp as otp_schemas, token as token_schemas
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Election Login"])
-
-
-def mask_email(email: str) -> str:
-    """Mask email for privacy, e.g. j***e@example.com."""
-    if not email or "@" not in email:
-        return email
-    parts = email.split("@")
-    name = parts[0]
-    domain = parts[1]
-    if len(name) <= 2:
-        masked_name = name[0] + "*"
-    else:
-        masked_name = name[0] + "*" * (len(name) - 2) + name[-1]
-    return f"{masked_name}@{domain}"
 
 
 # ============================================================

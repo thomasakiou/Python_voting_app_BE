@@ -11,8 +11,33 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
-# OTP GENERATION
+# OTP GENERATION & PRIVACY HELPERS
 # ============================================================
+
+def mask_email(email: str | None) -> str | None:
+    """Mask email for privacy, e.g. thom********@gmail.com."""
+    if not email or "@" not in email:
+        return email
+    parts = email.split("@", 1)
+    name, domain = parts[0], parts[1]
+    if len(name) <= 2:
+        masked_name = name[0] + "*" * max(1, len(name) - 1)
+    elif len(name) <= 4:
+        masked_name = name[:2] + "*" * (len(name) - 2)
+    else:
+        masked_name = name[:4] + "*" * max(8, len(name) - 4)
+    return f"{masked_name}@{domain}"
+
+
+def mask_phone(phone: str | None) -> str | None:
+    """Mask phone for privacy, e.g. ********957 (preserving last 3 digits)."""
+    if not phone:
+        return phone
+    clean = str(phone).strip()
+    if len(clean) <= 3:
+        return "*" * len(clean)
+    return "*" * (len(clean) - 3) + clean[-3:]
+
 
 def generate_otp(length: int = 6) -> str:
     """Generate a cryptographically secure numeric OTP."""

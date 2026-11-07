@@ -28,19 +28,21 @@ class AccreditationValidateResponse(BaseModel):
     is_active: bool
     phone: Optional[str] = None
     email: Optional[str] = None
+    masked_phone: Optional[str] = None
+    masked_email: Optional[str] = None
     message: Optional[str] = None
 
 
 class AccreditationSendOTPRequest(BaseModel):
-    """Step 2: Voter provides compulsory phone and email to request OTP."""
+    """Step 2: Voter confirms details and requests OTP for pre-registered email."""
     username: str
-    phone: str
-    email: EmailStr
+    phone: Optional[str] = None
+    email: Optional[str] = None
 
 
 class AccreditationVerifyOTPRequest(BaseModel):
-    """Step 3: Voter submits OTP + verified phone & email to complete accreditation."""
+    """Step 3: Voter submits OTP code to complete accreditation."""
     username: str
     otp_code: str
-    phone: str
-    email: EmailStr
+    phone: Optional[str] = None
+    email: Optional[str] = None

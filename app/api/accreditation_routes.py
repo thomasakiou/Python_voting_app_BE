@@ -5,7 +5,14 @@ import logging
 
 from ..core import database
 from ..core.config import settings
-from ..core.otp_utils import generate_otp, get_otp_expiry, send_otp_email, send_otp_sms
+from ..core.otp_utils import (
+    generate_otp,
+    get_otp_expiry,
+    send_otp_email,
+    send_otp_sms,
+    mask_email,
+    mask_phone,
+)
 from ..domain import user as user_models
 from ..domain import otp as otp_models
 from ..schemas import otp as otp_schemas
@@ -58,14 +65,25 @@ def validate_voter_for_accreditation(
             detail=f"Voter '{user.full_name}' is already accredited for the NECO MCS election. Please wait for election day to vote.",
         )
 
+    if not user.email or not user.email.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"No registered email address found for voter '{user.full_name}' (MCS #{username}). Please contact the election administrator to register your email.",
+        )
+
+    masked_email_val = mask_email(user.email)
+    masked_phone_val = mask_phone(user.phone) if user.phone else "Not provided"
+
     return otp_schemas.AccreditationValidateResponse(
         username=user.username,
         full_name=user.full_name,
         is_accredited=user.is_accredited,
         is_active=user.is_active,
-        phone=user.phone,
-        email=user.email,
-        message="Voter identity confirmed. Please enter your phone number and email to receive your OTP.",
+        phone=masked_phone_val,
+        email=masked_email_val,
+        masked_phone=masked_phone_val,
+        masked_email=masked_email_val,
+        message="Voter identity confirmed. Please review your details and request your OTP.",
     )
 
 
@@ -79,19 +97,10 @@ def send_accreditation_otp(
     db: Session = Depends(database.get_db),
 ):
     """
-    Accepts phone and email (both compulsory), generates OTP,
-    and sends it to the user's email with header 'NECO MCS Accreditation'.
-    Phone and email are NOT saved to the user table until OTP is verified.
+    Sends OTP to the voter's pre-registered email in the database.
+    Does not accept arbitrary email input to prevent voter impersonation.
     """
     username = payload.username.strip()
-    phone = payload.phone.strip()
-    email = payload.email.strip().lower()
-
-    if not phone or not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Both phone number and email address are compulsory.",
-        )
 
     user = (
         db.query(user_models.User)
@@ -117,6 +126,15 @@ def send_accreditation_otp(
             detail="You are already accredited for the NECO MCS election.",
         )
 
+    if not user.email or not user.email.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"No registered email address found for voter '{user.full_name}'. Please contact the administrator.",
+        )
+
+    registered_email = user.email.strip().lower()
+    registered_phone = user.phone.strip() if user.phone else None
+
     # Invalidate previous unused accreditation OTPs for this user
     db.query(otp_models.OTP).filter(
         otp_models.OTP.user_id == user.id,
@@ -131,8 +149,8 @@ def send_accreditation_otp(
         user_id=user.id,
         otp_code=otp_code,
         purpose="accreditation",
-        temp_email=email,
-        temp_phone=phone,
+        temp_email=registered_email,
+        temp_phone=registered_phone,
         expires_at=get_otp_expiry(settings.otp_expire_minutes),
         is_used=False,
     )
@@ -143,19 +161,24 @@ def send_accreditation_otp(
     # Using background tasks ensures high throughput for 3000+ voters
     background_tasks.add_task(
         send_otp_email,
-        recipient_email=email,
+        recipient_email=registered_email,
         otp_code=otp_code,
         full_name=user.full_name,
         subject="NECO MCS Accreditation",
         purpose_label="Accreditation",
     )
-    if phone:
-        background_tasks.add_task(send_otp_sms, phone, otp_code)
+    if registered_phone:
+        background_tasks.add_task(send_otp_sms, registered_phone, otp_code)
+
+    masked_e = mask_email(registered_email)
+    masked_p = mask_phone(registered_phone)
 
     return {
-        "message": f"OTP has been dispatched to {email}. Please enter the OTP to complete accreditation.",
+        "message": f"OTP has been dispatched to your registered email ({masked_e}). Please enter the OTP to complete accreditation.",
         "otp_sent": True,
         "expires_in_minutes": settings.otp_expire_minutes,
+        "masked_email": masked_e,
+        "masked_phone": masked_p,
     }
 
 
@@ -168,13 +191,11 @@ def verify_accreditation_otp(
     db: Session = Depends(database.get_db),
 ):
     """
-    Verifies the accreditation OTP. Only after OTP validation are the
-    user's phone and email fields populated and is_accredited set to True.
+    Verifies the accreditation OTP. Only marks user as accredited without
+    allowing client to overwrite the registered contact information.
     """
     username = payload.username.strip()
     otp_code = payload.otp_code.strip()
-    phone = payload.phone.strip()
-    email = payload.email.strip().lower()
 
     user = (
         db.query(user_models.User)
@@ -200,6 +221,10 @@ def verify_accreditation_otp(
             "accredited": True,
             "full_name": user.full_name,
             "username": user.username,
+            "email": mask_email(user.email),
+            "phone": mask_phone(user.phone),
+            "masked_email": mask_email(user.email),
+            "masked_phone": mask_phone(user.phone),
         }
 
     # Find latest valid accreditation OTP
@@ -244,21 +269,21 @@ def verify_accreditation_otp(
     # Mark OTP as used
     otp_entry.is_used = True
 
-    # NOW populate user phone, email, and accreditation status!
-    user.phone = phone
-    user.email = email
+    # Mark user as accredited
     user.is_accredited = True
     user.accredited_at = now
     db.commit()
     db.refresh(user)
 
-    logger.info(f"Voter '{user.username}' successfully accredited with email '{user.email}'")
+    logger.info(f"Voter '{user.username}' successfully accredited with pre-registered email '{user.email}'")
 
     return {
         "message": "you have been successfully accredited for the NECO MCS election, wait for further instruction for voting.",
         "accredited": True,
         "full_name": user.full_name,
         "username": user.username,
-        "email": user.email,
-        "phone": user.phone,
+        "email": mask_email(user.email),
+        "phone": mask_phone(user.phone),
+        "masked_email": mask_email(user.email),
+        "masked_phone": mask_phone(user.phone),
     }

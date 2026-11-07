@@ -110,37 +110,34 @@ def send_contact_otp(
             detail="Your account has been deactivated / disqualified.",
         )
 
-    # Determine target email
+    # Determine target email and phone
     has_existing_email = bool(user.email and user.email.strip())
+    new_email = str(payload.email).strip().lower() if payload.email and str(payload.email).strip() else None
+
     if has_existing_email:
-        # Existing email is immutable here
         target_email = user.email.strip().lower()
     else:
-        if not payload.email or not str(payload.email).strip():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email address is required.",
+        target_email = new_email
+        if target_email:
+            # UNIQUENESS CHECK: Ensure no two voters share the same email
+            email_exists = (
+                db.query(user_models.User)
+                .filter(func.lower(user_models.User.email) == target_email, user_models.User.id != user.id)
+                .first()
             )
-        target_email = str(payload.email).strip().lower()
+            if email_exists:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="This email address is already registered to another voter. Every email must be unique.",
+                )
 
-        # UNIQUENESS CHECK: Ensure no two voters share the same email
-        email_exists = (
-            db.query(user_models.User)
-            .filter(func.lower(user_models.User.email) == target_email, user_models.User.id != user.id)
-            .first()
-        )
-        if email_exists:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="This email address is already registered to another voter. Every email must be unique.",
-            )
-
-    # Determine target phone
     has_existing_phone = bool(user.phone and user.phone.strip())
+    new_phone = str(payload.phone).strip() if payload.phone and str(payload.phone).strip() else None
+
     if has_existing_phone:
         target_phone = user.phone.strip()
     else:
-        target_phone = payload.phone.strip() if payload.phone else None
+        target_phone = new_phone
         if target_phone:
             # UNIQUENESS CHECK: Ensure no two voters share the same phone number
             phone_exists = (
@@ -153,6 +150,13 @@ def send_contact_otp(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="This phone number is already registered to another voter. Every phone number must be unique.",
                 )
+
+    # Ensure voter has at least one contact destination
+    if not target_email and not target_phone:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please provide at least an email address or a phone number to receive your OTP.",
+        )
 
     # Invalidate prior unused contact_update OTPs for this user
     db.query(otp_models.OTP).filter(
@@ -176,22 +180,34 @@ def send_contact_otp(
     db.add(otp_entry)
     db.commit()
 
-    # Deliver OTP via background task
-    background_tasks.add_task(
-        send_otp_email,
-        recipient_email=target_email,
-        otp_code=otp_code,
-        full_name=user.full_name,
-        subject="NECO MCS Contact Verification",
-        purpose_label="Contact Verification",
-    )
+    # Deliver OTP: Send to Email if present, Phone if present, or BOTH if both present
+    destinations = []
+    if target_email:
+        background_tasks.add_task(
+            send_otp_email,
+            recipient_email=target_email,
+            otp_code=otp_code,
+            full_name=user.full_name,
+            subject="NECO MCS Contact Verification",
+            purpose_label="Contact Verification",
+        )
+        destinations.append(f"email ({mask_email(target_email)})")
+
     if target_phone:
-        background_tasks.add_task(send_otp_sms, target_phone, otp_code)
+        background_tasks.add_task(
+            send_otp_sms, 
+            phone_number=target_phone, 
+            otp_code=otp_code,
+            purpose_label="Contact Verification",
+        )
+        destinations.append(f"phone ({mask_phone(target_phone)})")
+
+    dest_str = " and ".join(destinations) if destinations else "contact address"
 
     return {
-        "message": f"Verification OTP has been sent to {mask_email(target_email)}. Please enter it to confirm.",
+        "message": f"Verification OTP has been sent to your registered {dest_str}. Please enter it to confirm.",
         "otp_sent": True,
-        "masked_email": mask_email(target_email),
+        "masked_email": mask_email(target_email) if target_email else None,
         "masked_phone": mask_phone(target_phone) if target_phone else None,
         "expires_in_minutes": settings.otp_expire_minutes,
     }

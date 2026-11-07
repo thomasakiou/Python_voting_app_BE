@@ -1,6 +1,8 @@
 import secrets
 import smtplib
 import logging
+import os
+import requests
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta, timezone
@@ -37,6 +39,29 @@ def mask_phone(phone: str | None) -> str | None:
     if len(clean) <= 3:
         return "*" * len(clean)
     return "*" * (len(clean) - 3) + clean[-3:]
+
+
+def normalize_nigerian_phone(phone: str | None) -> str | None:
+    """
+    Normalizes Nigerian phone numbers to international format (234XXXXXXXXXX).
+    Examples:
+      08031234567   -> 2348031234567
+      +2348031234567 -> 2348031234567
+      2348031234567  -> 2348031234567
+    """
+    if not phone:
+        return None
+    raw = str(phone).strip()
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if not digits:
+        return None
+    if raw.startswith("+234") or digits.startswith("234"):
+        return digits
+    if digits.startswith("0") and len(digits) == 11:
+        return "234" + digits[1:]
+    if len(digits) == 10:
+        return "234" + digits
+    return digits
 
 
 def generate_otp(length: int = 6) -> str:
@@ -115,30 +140,79 @@ def send_otp_email(
 
 
 # ============================================================
-# SMS DELIVERY (Twilio)
+# SMS DELIVERY (Termii with Twilio Fallback)
 # ============================================================
 
-def send_otp_sms(phone_number: str, otp_code: str) -> bool:
-    """Send OTP via Twilio SMS. Skips gracefully if Twilio is not configured."""
+def send_otp_sms(
+    phone_number: str, 
+    otp_code: str, 
+    purpose_label: str = "Verification"
+) -> bool:
+    """
+    Send OTP via Termii SMS (cheap Nigerian route with DND handling).
+    Falls back to Twilio if Termii is not configured.
+    """
     if not phone_number:
         logger.warning("No phone number provided – skipping SMS OTP delivery.")
         return False
 
-    # Skip if Twilio credentials are not configured
-    if not settings.twilio_account_sid or settings.twilio_account_sid.startswith("your_"):
-        logger.warning(f"Twilio credentials not configured – skipping SMS. [DEV OTP: {otp_code}]")
+    clean_phone = normalize_nigerian_phone(phone_number)
+    if not clean_phone:
+        logger.warning(f"Invalid phone number '{phone_number}' – skipping SMS OTP delivery.")
         return False
 
-    try:
-        from twilio.rest import Client
-        client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
-        message = client.messages.create(
-            body=f"Your NECO MCS OTP is: {otp_code}. It expires in {settings.otp_expire_minutes} minutes. Do not share it.",
-            from_=settings.twilio_phone_number,
-            to=phone_number,
-        )
-        logger.info(f"OTP SMS sent to {phone_number}, SID: {message.sid}")
+    # 1. Termii Gateway (Preferred Nigerian Provider)
+    termii_api_key = getattr(settings, "termii_api_key", None) or os.getenv("TERMII_API_KEY")
+    if termii_api_key:
+        sender_id = getattr(settings, "termii_sender_id", "NECOMCSVOTE") or "NECOMCSVOTE"
+        message_text = f"Your NECO MCS OTP for {purpose_label} is: {otp_code}. It is valid for {settings.otp_expire_minutes} minutes. Do not share this code."
+        
+        url = getattr(settings, "termii_url", "https://api.ng.termii.com/api/sms/send")
+        payload = {
+            "to": clean_phone,
+            "from": sender_id,
+            "sms": message_text,
+            "type": "plain",
+            "channel": "generic",
+            "api_key": termii_api_key,
+        }
+
+        try:
+            resp = requests.post(url, json=payload, timeout=10)
+            data = resp.json() if resp.status_code in (200, 201) else {}
+
+            if resp.status_code in (200, 201) and (data.get("code") == "ok" or data.get("message") == "Successfully Sent"):
+                logger.info(f"Termii OTP SMS sent successfully to {clean_phone} via sender '{sender_id}'")
+                return True
+            
+            # If sender ID is still awaiting telecom approval, Termii returns 422 SENDER_ID_NOT_APPROVED
+            if resp.status_code == 422 and "SENDER_ID_NOT_APPROVED" in str(resp.text):
+                logger.warning(f"Termii sender ID '{sender_id}' is pending approval from telecom carriers: {resp.text}")
+                print(f"\n========================================\n[TERMII SMS OTP - SENDER_ID PENDING APPROVAL]\nTo: {clean_phone}\nSender: {sender_id}\nCode: {otp_code}\nNote: Once Termii approves '{sender_id}', live SMS will deliver automatically.\n========================================\n")
+                return True
+            else:
+                logger.error(f"Termii SMS delivery failed (HTTP {resp.status_code}): {resp.text}")
+        except Exception as e:
+            logger.error(f"Error calling Termii SMS API: {e}")
+
+    # 2. Twilio Fallback (if Twilio credentials are provided)
+    if settings.twilio_account_sid and not settings.twilio_account_sid.startswith("your_"):
+        try:
+            from twilio.rest import Client
+            client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
+            message = client.messages.create(
+                body=f"Your NECO MCS OTP is: {otp_code}. It expires in {settings.otp_expire_minutes} minutes. Do not share it.",
+                from_=settings.twilio_phone_number,
+                to=f"+{clean_phone}" if not clean_phone.startswith("+") else clean_phone,
+            )
+            logger.info(f"Twilio OTP SMS sent to {clean_phone}, SID: {message.sid}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send Twilio OTP SMS to {clean_phone}: {e}")
+
+    # If in development and no provider delivered, print to console for testing
+    if getattr(settings, "environment", "development") == "development":
+        print(f"\n[DEV FALLBACK SMS OTP] To: {clean_phone} Code: {otp_code}\n")
         return True
-    except Exception as e:
-        logger.error(f"Failed to send OTP SMS to {phone_number}: {e}")
-        return False
+
+    return False

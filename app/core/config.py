@@ -23,7 +23,12 @@ class Settings(BaseSettings):
     smtp_password: str = "clttxcgjpxduquzy"
     smtp_sender_email: str = "necomcsvotes@gmail.com"
 
-    # Twilio (SMS) settings
+    # Termii (Nigeria SMS) settings
+    termii_api_key: str = "tlv_Z9KHmm0FTQPi1wLPdtJAc1oLOxmLa4GwLt_AmtTo1uY"
+    termii_sender_id: str = "NECOMCSVOTE"
+    termii_url: str = "https://api.ng.termii.com/api/sms/send"
+
+    # Twilio (SMS fallback) settings
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_phone_number: str = ""

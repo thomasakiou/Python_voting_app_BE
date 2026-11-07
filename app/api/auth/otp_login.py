@@ -83,11 +83,13 @@ def initiate_login(
                 detail=f"Device Authorization Error: You can only vote using the specific device ({device_desc}) used during your voter accreditation.",
             )
 
-    # 5. Check user email
-    if not user.email:
+    # 5. Check user has at least one contact channel (Email OR Phone)
+    has_email = bool(user.email and user.email.strip())
+    has_phone = bool(user.phone and user.phone.strip())
+    if not has_email and not has_phone:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No registered email address found for your profile. Please contact the administrator.",
+            detail=f"No registered email or phone number found for voter '{user.full_name}'. Please register your contact details first at /contact-update.",
         )
 
     # 6. Check if election is open / voting has started
@@ -118,22 +120,37 @@ def initiate_login(
     db.add(otp_entry)
     db.commit()
 
-    # 9. Deliver OTP via BackgroundTasks with header 'NECO MCS Voting'
-    background_tasks.add_task(
-        send_otp_email,
-        recipient_email=user.email,
-        otp_code=otp_code,
-        full_name=user.full_name,
-        subject="NECO MCS Voting",
-        purpose_label="Voting Login",
-    )
-    if user.phone:
-        background_tasks.add_task(send_otp_sms, user.phone, otp_code)
+    # 9. Deliver OTP: Send to Email if present, Phone if present, or BOTH if both present
+    destinations = []
+    if has_email:
+        background_tasks.add_task(
+            send_otp_email,
+            recipient_email=user.email.strip(),
+            otp_code=otp_code,
+            full_name=user.full_name,
+            subject="NECO MCS Voting",
+            purpose_label="Voting Login",
+        )
+        destinations.append(f"email ({mask_email(user.email)})")
+
+    if has_phone:
+        background_tasks.add_task(
+            send_otp_sms,
+            phone_number=user.phone.strip(),
+            otp_code=otp_code,
+            purpose_label="Voting Login",
+        )
+        destinations.append(f"phone ({mask_phone(user.phone)})")
+
+    dest_str = " and ".join(destinations) if destinations else "contact address"
 
     return {
-        "message": f"A 6-digit OTP has been sent to your registered email ({mask_email(user.email)}). Please enter it to access your ballot.",
+        "message": f"A 6-digit OTP has been sent to your registered {dest_str}. Please enter it to access your ballot.",
         "otp_sent": True,
-        "masked_email": mask_email(user.email),
+        "masked_email": mask_email(user.email) if has_email else None,
+        "masked_phone": mask_phone(user.phone) if has_phone else None,
+        "has_email": has_email,
+        "has_phone": has_phone,
         "username": user.username,
         "full_name": user.full_name,
     }

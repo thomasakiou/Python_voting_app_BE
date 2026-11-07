@@ -65,14 +65,17 @@ def validate_voter_for_accreditation(
             detail=f"Voter '{user.full_name}' is already accredited for the NECO MCS election. Please wait for election day to vote.",
         )
 
-    if not user.email or not user.email.strip():
+    # Check voter has at least one contact method (email OR phone)
+    has_email = bool(user.email and user.email.strip())
+    has_phone = bool(user.phone and user.phone.strip())
+    if not has_email and not has_phone:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"No registered email address found for voter '{user.full_name}' (MCS #{username}). Please contact the election administrator to register your email.",
+            detail=f"No registered email or phone number found for voter '{user.full_name}' (MCS #{username}). Please register your contact details first at /contact-update.",
         )
 
-    masked_email_val = mask_email(user.email)
-    masked_phone_val = mask_phone(user.phone) if user.phone else "Not provided"
+    masked_email_val = mask_email(user.email) if has_email else "Not provided"
+    masked_phone_val = mask_phone(user.phone) if has_phone else "Not provided"
 
     return otp_schemas.AccreditationValidateResponse(
         username=user.username,
@@ -126,14 +129,16 @@ def send_accreditation_otp(
             detail="You are already accredited for the NECO MCS election.",
         )
 
-    if not user.email or not user.email.strip():
+    has_email = bool(user.email and user.email.strip())
+    has_phone = bool(user.phone and user.phone.strip())
+    if not has_email and not has_phone:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"No registered email address found for voter '{user.full_name}'. Please contact the administrator.",
+            detail=f"No registered email or phone number found for voter '{user.full_name}'. Please register your contact details first at /contact-update.",
         )
 
-    registered_email = user.email.strip().lower()
-    registered_phone = user.phone.strip() if user.phone else None
+    registered_email = user.email.strip().lower() if has_email else None
+    registered_phone = user.phone.strip() if has_phone else None
 
     # Invalidate previous unused accreditation OTPs for this user
     db.query(otp_models.OTP).filter(
@@ -157,24 +162,34 @@ def send_accreditation_otp(
     db.add(otp_entry)
     db.commit()
 
-    # Deliver OTP with header "NECO MCS Accreditation"
-    # Using background tasks ensures high throughput for 3000+ voters
-    background_tasks.add_task(
-        send_otp_email,
-        recipient_email=registered_email,
-        otp_code=otp_code,
-        full_name=user.full_name,
-        subject="NECO MCS Accreditation",
-        purpose_label="Accreditation",
-    )
-    if registered_phone:
-        background_tasks.add_task(send_otp_sms, registered_phone, otp_code)
+    # Deliver OTP: Send to Email if present, Phone if present, or BOTH if both present
+    destinations = []
+    if registered_email:
+        background_tasks.add_task(
+            send_otp_email,
+            recipient_email=registered_email,
+            otp_code=otp_code,
+            full_name=user.full_name,
+            subject="NECO MCS Accreditation",
+            purpose_label="Accreditation",
+        )
+        destinations.append(f"email ({mask_email(registered_email)})")
 
-    masked_e = mask_email(registered_email)
-    masked_p = mask_phone(registered_phone)
+    if registered_phone:
+        background_tasks.add_task(
+            send_otp_sms, 
+            phone_number=registered_phone, 
+            otp_code=otp_code,
+            purpose_label="Accreditation",
+        )
+        destinations.append(f"phone ({mask_phone(registered_phone)})")
+
+    dest_str = " and ".join(destinations) if destinations else "contact address"
+    masked_e = mask_email(registered_email) if registered_email else None
+    masked_p = mask_phone(registered_phone) if registered_phone else None
 
     return {
-        "message": f"OTP has been dispatched to your registered email ({masked_e}). Please enter the OTP to complete accreditation.",
+        "message": f"OTP has been dispatched to your registered {dest_str}. Please enter the OTP to complete accreditation.",
         "otp_sent": True,
         "expires_in_minutes": settings.otp_expire_minutes,
         "masked_email": masked_e,

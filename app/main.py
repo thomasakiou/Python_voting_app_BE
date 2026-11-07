@@ -63,6 +63,12 @@ def auto_upgrade_schema():
             created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
             resolved_at TIMESTAMP WITH TIME ZONE
         );""",
+        "CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);",
+        "CREATE INDEX IF NOT EXISTS idx_users_is_accredited ON users(is_accredited);",
+        "CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);",
+        "CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);",
+        "CREATE INDEX IF NOT EXISTS idx_votes_user_id ON votes(user_id);",
+        "CREATE INDEX IF NOT EXISTS idx_votes_office_code ON votes(office_code);",
     ]
     try:
         with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:

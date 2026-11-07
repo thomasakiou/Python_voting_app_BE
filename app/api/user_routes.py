@@ -52,29 +52,30 @@ def get_voters_analysis(
     if cached:
         return cached
 
-    # Voters count
-    total_voters = db.query(User).filter(User.role == "voter").count()
-    accredited_voters = db.query(User).filter(User.role == "voter", User.is_accredited == True).count()
-    unaccredited_voters = total_voters - accredited_voters
+    # Optimized single aggregation query across all voters
+    stats_row = db.query(
+        func.count().filter(User.role == "voter").label("total_voters"),
+        func.count().filter(User.role == "voter", User.is_accredited == True).label("accredited_voters"),
+        func.count().filter(User.role == "voter", User.is_active == True).label("active_voters"),
+        func.count().filter(User.role == "voter", User.is_active == False).label("disabled_voters"),
+        func.count().filter(User.role == "voter", User.is_active == True, User.is_accredited == True).label("eligible_voters"),
+    ).first()
 
-    active_voters = db.query(User).filter(User.role == "voter", User.is_active == True).count()
-    disabled_voters = db.query(User).filter(User.role == "voter", User.is_active == False).count()
+    total_voters = (stats_row.total_voters if stats_row else 0) or 0
+    accredited_voters = (stats_row.accredited_voters if stats_row else 0) or 0
+    active_voters = (stats_row.active_voters if stats_row else 0) or 0
+    disabled_voters = (stats_row.disabled_voters if stats_row else 0) or 0
+    eligible_voters = (stats_row.eligible_voters if stats_row else 0) or 0
+    unaccredited_voters = max(0, total_voters - accredited_voters)
+    non_eligible_voters = max(0, total_voters - eligible_voters)
 
-    # Eligible voters are both active and accredited
-    eligible_voters = db.query(User).filter(
-        User.role == "voter",
-        User.is_active == True,
-        User.is_accredited == True
-    ).count()
-
-    # Non-eligible voters are either disabled OR unaccredited
-    non_eligible_voters = total_voters - eligible_voters
-
-    # Votes cast
-    total_votes_cast = db.query(Vote).count()
-
-    # Unique voters who cast at least one vote
-    unique_voters_voted = db.query(func.count(func.distinct(Vote.user_id))).scalar() or 0
+    # Optimized single query for total votes and unique voters
+    vote_stats = db.query(
+        func.count(Vote.id).label("total_votes"),
+        func.count(func.distinct(Vote.user_id)).label("unique_voters")
+    ).first()
+    total_votes_cast = (vote_stats.total_votes if vote_stats else 0) or 0
+    unique_voters_voted = (vote_stats.unique_voters if vote_stats else 0) or 0
 
     turnout_percentage = 0.0
     if accredited_voters > 0:
@@ -91,7 +92,7 @@ def get_voters_analysis(
         total_votes_cast=total_votes_cast,
         turnout_percentage=turnout_percentage,
     )
-    cache.set("voter_analysis", result, ttl_seconds=5)
+    cache.set("voter_analysis", result, ttl_seconds=15)
     return result
 
 
@@ -339,6 +340,7 @@ def create_voter_user(
     handler = CreateUserHandler(db)
     created = handler.handle(command)
     cache.delete("voter_analysis")
+    cache.delete("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -379,7 +381,8 @@ def upload_voters_csv(
     try:
         for row in reader:
             username = row.get("username", "").strip()
-            if not username:
+            # Skip empty or repeated header rows embedded in CSV
+            if not username or username.lower() in ("username", "mcs_number", "mcs", "voter_id"):
                 continue
 
             voters.append({
@@ -401,6 +404,7 @@ def upload_voters_csv(
     result = handler.handle(command)
 
     cache.delete("voter_analysis")
+    cache.delete("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -426,9 +430,15 @@ def get_all_users(
     db: Session = Depends(get_db),
     current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
 ):
+    cached = cache.get("all_users_list")
+    if cached is not None:
+        return cached
+
     query = ListUsersQuery()
     handler = ListUsersHandler(db)
-    return handler.handle(query)
+    users = handler.handle(query)
+    cache.set("all_users_list", users, ttl_seconds=15)
+    return users
 
 
 # ============================================================
@@ -468,6 +478,7 @@ def delete_user(
     handler = DeleteUserHandler(db)
     result = handler.handle(command)
     cache.delete("voter_analysis")
+    cache.delete("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -502,6 +513,7 @@ def toggle_active_status(
     updated_user = handler.handle(command)
 
     cache.delete("voter_analysis")
+    cache.delete("all_users_list")
 
     action_label = "ENABLE_USER" if is_active else "DISABLE_USER"
     record_audit_log(
@@ -529,6 +541,7 @@ def disable_all_voters(
     handler = DisableAllVotersHandler(db)
     result = handler.handle(command)
     cache.delete("voter_analysis")
+    cache.delete("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -552,6 +565,7 @@ def enable_all_voters(
     handler = EnableAllVotersHandler(db)
     result = handler.handle(command)
     cache.delete("voter_analysis")
+    cache.delete("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -621,6 +635,7 @@ def reverse_voter_accreditation(
     db.refresh(user)
 
     cache.delete("voter_analysis")
+    cache.delete("all_users_list")
 
     record_audit_log(
         db=db,

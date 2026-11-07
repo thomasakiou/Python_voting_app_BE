@@ -567,6 +567,9 @@ def enable_all_voters(
 # REVERSE VOTER ACCREDITATION (ADMIN)
 # ============================================================
 @router.patch("/{user_id}/reverse-accreditation", response_model=schemas.UserOut)
+@router.patch("/{user_id}/reverse-accreditation/", response_model=schemas.UserOut)
+@router.post("/{user_id}/reverse-accreditation", response_model=schemas.UserOut)
+@router.post("/{user_id}/reverse-accreditation/", response_model=schemas.UserOut)
 def reverse_voter_accreditation(
     user_id: int,
     db: Session = Depends(database.get_db),
@@ -631,6 +634,9 @@ def reverse_voter_accreditation(
 
 
 @router.patch("/username/{username}/reverse-accreditation", response_model=schemas.UserOut)
+@router.patch("/username/{username}/reverse-accreditation/", response_model=schemas.UserOut)
+@router.post("/username/{username}/reverse-accreditation", response_model=schemas.UserOut)
+@router.post("/username/{username}/reverse-accreditation/", response_model=schemas.UserOut)
 def reverse_voter_accreditation_by_username(
     username: str,
     db: Session = Depends(database.get_db),

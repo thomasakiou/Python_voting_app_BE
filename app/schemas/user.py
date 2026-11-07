@@ -49,6 +49,8 @@ class UserOut(UserBase):
     is_active: Optional[bool] = True
     is_accredited: Optional[bool] = False
     accredited_at: Optional[datetime] = None
+    accredited_device_id: Optional[str] = None
+    device_info: Optional[str] = None
     email: Optional[str] = None
 
     class Config:

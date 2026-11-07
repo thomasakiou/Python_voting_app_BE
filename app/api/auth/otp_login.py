@@ -73,6 +73,16 @@ def initiate_login(
             detail="You are not accredited for this election. Please complete voter accreditation first at /accreditation.",
         )
 
+    # 4b. Enforce Device Binding: Voter MUST vote from the device used for accreditation
+    if user.accredited_device_id:
+        client_device_id = (credentials.device_id or "").strip()
+        if not client_device_id or client_device_id != user.accredited_device_id:
+            device_desc = user.device_info or "the device used during accreditation"
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Device Authorization Error: You can only vote using the specific device ({device_desc}) used during your voter accreditation.",
+            )
+
     # 5. Check user email
     if not user.email:
         raise HTTPException(
@@ -169,6 +179,16 @@ def verify_otp(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You must be accredited to log in for voting.",
         )
+
+    # 3b. Enforce Device Binding
+    if user.accredited_device_id:
+        client_device_id = (credentials.device_id or "").strip()
+        if not client_device_id or client_device_id != user.accredited_device_id:
+            device_desc = user.device_info or "the device used during accreditation"
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Device Authorization Error: You can only vote using the specific device ({device_desc}) used during your voter accreditation.",
+            )
 
     # 4. Check election status
     voting_record = db.query(vt_models.VotingTime).first()

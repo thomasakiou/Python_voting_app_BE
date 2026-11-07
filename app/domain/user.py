@@ -17,6 +17,8 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     is_accredited = Column(Boolean, default=False, nullable=False)
     accredited_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    accredited_device_id = Column(String(255), nullable=True)
+    device_info = Column(String(255), nullable=True)
     must_change_password = Column(Boolean, default=True)
     role = Column(Enum("super-admin", "admin", "voter", name="user_roles"), default="voter", nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text('now()'))

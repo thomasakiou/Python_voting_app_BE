@@ -34,6 +34,8 @@ def auto_upgrade_schema():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_accredited BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS accredited_at TIMESTAMP WITH TIME ZONE;",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS accredited_device_id VARCHAR(255);",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS device_info VARCHAR(255);",
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS is_disqualified BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE offices ADD COLUMN IF NOT EXISTS is_disqualified BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE votes ADD COLUMN IF NOT EXISTS receipt_hash VARCHAR(64);",

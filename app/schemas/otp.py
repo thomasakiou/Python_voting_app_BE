@@ -4,15 +4,17 @@ from datetime import datetime
 
 
 class LoginRequest(BaseModel):
-    """Voter election day login: username (4-digit MCS number). Optional phone for backwards compatibility."""
+    """Voter election day login: username (4-digit MCS number). Optional device_id and phone."""
     username: str
     phone: Optional[str] = None
+    device_id: Optional[str] = None
 
 
 class VerifyOTPRequest(BaseModel):
-    """Voter submits username + the 6-digit OTP."""
+    """Voter submits username + the 6-digit OTP + device_id."""
     username: str
     otp_code: str
+    device_id: Optional[str] = None
 
 
 # Accreditation Schemas
@@ -41,8 +43,10 @@ class AccreditationSendOTPRequest(BaseModel):
 
 
 class AccreditationVerifyOTPRequest(BaseModel):
-    """Step 3: Voter submits OTP code to complete accreditation."""
+    """Step 3: Voter submits OTP code to complete accreditation, binding physical device."""
     username: str
     otp_code: str
     phone: Optional[str] = None
     email: Optional[str] = None
+    device_id: Optional[str] = None
+    device_info: Optional[str] = None

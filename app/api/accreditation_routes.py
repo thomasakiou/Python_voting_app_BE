@@ -269,13 +269,19 @@ def verify_accreditation_otp(
     # Mark OTP as used
     otp_entry.is_used = True
 
+    # Bind the voter to this physical device
+    if payload.device_id:
+        user.accredited_device_id = payload.device_id.strip()
+    if payload.device_info:
+        user.device_info = payload.device_info.strip()
+
     # Mark user as accredited
     user.is_accredited = True
     user.accredited_at = now
     db.commit()
     db.refresh(user)
 
-    logger.info(f"Voter '{user.username}' successfully accredited with pre-registered email '{user.email}'")
+    logger.info(f"Voter '{user.username}' successfully accredited and bound to device '{user.device_info or user.accredited_device_id}'")
 
     return {
         "message": "you have been successfully accredited for the NECO MCS election, wait for further instruction for voting.",
@@ -286,4 +292,5 @@ def verify_accreditation_otp(
         "phone": mask_phone(user.phone),
         "masked_email": mask_email(user.email),
         "masked_phone": mask_phone(user.phone),
+        "device_info": user.device_info,
     }

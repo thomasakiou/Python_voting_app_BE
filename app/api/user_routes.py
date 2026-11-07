@@ -612,9 +612,11 @@ def reverse_voter_accreditation(
         otp_models.OTP.purpose == "accreditation",
     ).update({"is_used": True})
 
-    # Reset accreditation fields
+    # Reset accreditation fields and release device lock
     user.is_accredited = False
     user.accredited_at = None
+    user.accredited_device_id = None
+    user.device_info = None
     db.commit()
     db.refresh(user)
 

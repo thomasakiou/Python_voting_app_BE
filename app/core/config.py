@@ -19,9 +19,9 @@ class Settings(BaseSettings):
     # SMTP (Email) settings
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
-    smtp_username: str = ""
-    smtp_password: str = ""
-    smtp_sender_email: str = ""
+    smtp_username: str = "necomcsvotes@gmail.com"
+    smtp_password: str = "clttxcgjpxduquzy"
+    smtp_sender_email: str = "necomcsvotes@gmail.com"
 
     # Twilio (SMS) settings
     twilio_account_sid: str = ""

@@ -16,5 +16,4 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     id: int | None = None
     role: str | None = None
-
-
+    session_id: str | None = None

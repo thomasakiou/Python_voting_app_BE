@@ -42,10 +42,11 @@ def verify_access_token(token: str, credentials_exception):
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         id: str = payload.get("user_id")
         role: str = payload.get("role")
+        session_id: str = payload.get("session_id")
 
         if id is None:
             raise credentials_exception
-        token_data = tokenData.TokenData(id=id)
+        token_data = tokenData.TokenData(id=id, role=role, session_id=session_id)
     except JWTError:
         raise credentials_exception
     
@@ -62,6 +63,16 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.query(models.User).filter(models.User.id == token_data.id).first()
     if not user:
         raise credentials_exception
+
+    # Enforce single session for admin accounts
+    if user.role in ("admin", "super-admin") and user.current_session_id:
+        if token_data.session_id != user.current_session_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Admin session expired: A new login was initiated on another device.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
     return user
 
 

@@ -69,6 +69,8 @@ def auto_upgrade_schema():
         "CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);",
         "CREATE INDEX IF NOT EXISTS idx_votes_user_id ON votes(user_id);",
         "CREATE INDEX IF NOT EXISTS idx_votes_office_code ON votes(office_code);",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_session_id VARCHAR(255);",
+        "UPDATE users SET email = NULL WHERE role IN ('admin', 'super-admin') AND email IS NOT NULL;",
     ]
     try:
         with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:

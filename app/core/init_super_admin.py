@@ -11,11 +11,18 @@ def init_super_admin(db: Session):
             full_name=SUPER_ADMIN_FULLNAME,
             password=hash_password(SUPER_ADMIN_PASSWORD),
             role="super-admin",
-            must_change_password=False
+            must_change_password=False,
+            email=None,
+            phone=None,
         )
         db.add(super_admin)
         db.commit()
         db.refresh(super_admin)
-        print("Super admin created")
+        print("Super admin created without email")
     else:
+        # Ensure admin has no email so voter email addresses are never occupied
+        if existing_user.email is not None:
+            existing_user.email = None
+            db.commit()
+            print("Removed email from super admin account")
         print("ℹSuper admin already exists")

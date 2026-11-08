@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Response, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from typing import Optional, List
 import io
 import csv
@@ -33,6 +33,48 @@ from ..application.commands.user.disable_enable_voters import (
 )
 
 router = APIRouter(prefix=f"{settings.api_prefix}/users", tags=["Users"])
+
+
+def apply_user_filters(
+    query,
+    search: Optional[str] = None,
+    role: Optional[str] = None,
+    status: Optional[str] = None,
+    accreditation: Optional[str] = None,
+):
+    if role and role != "all":
+        query = query.filter(User.role == role)
+    else:
+        query = query.filter(User.role == "voter")
+
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.filter(
+            or_(
+                User.username.ilike(term),
+                User.full_name.ilike(term),
+                User.phone.ilike(term),
+                User.email.ilike(term),
+            )
+        )
+
+    if status and status != "all":
+        if status == "active":
+            query = query.filter(User.is_active == True)
+        elif status == "inactive":
+            query = query.filter(User.is_active == False)
+        elif status == "eligible":
+            query = query.filter(User.is_active == True, User.is_accredited == True)
+        elif status == "ineligible":
+            query = query.filter(or_(User.is_active == False, User.is_accredited == False))
+
+    if accreditation and accreditation != "all":
+        if accreditation == "accredited":
+            query = query.filter(User.is_accredited == True)
+        elif accreditation in ("pending", "unaccredited"):
+            query = query.filter(User.is_accredited == False)
+
+    return query
 
 
 # ============================================================
@@ -97,22 +139,23 @@ def get_voters_analysis(
 
 
 # ============================================================
-# EXPORT ALL VOTERS AS CSV (REQUIREMENT 3)
+# EXPORT ALL / FILTERED VOTERS AS CSV
 # ============================================================
 @router.get("/export/csv")
 def export_voters_csv(
+    search: Optional[str] = None,
+    role: Optional[str] = None,
+    status: Optional[str] = None,
+    accreditation: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
 ):
     """
-    Download a CSV file containing all voters and their accreditation/eligibility statuses.
+    Download a CSV file containing voters matching the selected filters.
     """
-    voters = (
-        db.query(User)
-        .filter(User.role == "voter")
-        .order_by(User.username.asc())
-        .all()
-    )
+    query = db.query(User)
+    query = apply_user_filters(query, search=search, role=role, status=status, accreditation=accreditation)
+    voters = query.order_by(User.username.asc()).all()
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -152,20 +195,24 @@ def export_voters_csv(
 
 
 # ============================================================
-# EXPORT ALL VOTERS AS PDF (REQUIREMENT 3)
+# EXPORT ALL / FILTERED VOTERS AS PDF
 # ============================================================
 @router.get("/export/pdf")
 def export_voters_pdf(
+    search: Optional[str] = None,
+    role: Optional[str] = None,
+    status: Optional[str] = None,
+    accreditation: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
 ):
     """
-    Download a professional PDF document containing all voters and their statuses.
+    Download a professional PDF document containing voters matching the selected filters.
     """
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import letter, landscape
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     except ImportError:
         raise HTTPException(
@@ -175,12 +222,9 @@ def export_voters_pdf(
 
     import html
 
-    voters = (
-        db.query(User)
-        .filter(User.role == "voter")
-        .order_by(User.username.asc())
-        .all()
-    )
+    query = db.query(User)
+    query = apply_user_filters(query, search=search, role=role, status=status, accreditation=accreditation)
+    voters = query.order_by(User.username.asc()).all()
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -229,7 +273,7 @@ def export_voters_pdf(
 
     story = []
     story.append(Paragraph("NECO MCS ELECTION - OFFICIAL VOTERS REGISTER", title_style))
-    story.append(Paragraph(f"Export Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Total Voters: {len(voters)}", subtitle_style))
+    story.append(Paragraph(f"Export Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Total Records: {len(voters)}", subtitle_style))
 
     data = [[
         Paragraph("MCS #", header_style),
@@ -311,8 +355,8 @@ def create_admin_user(
         db=db,
         admin_username=current_user.username,
         action="CREATE_ADMIN",
-        target_type="USER",
-        target_id=created.username,
+        target_type="ADMIN",
+        target_id=str(created.username),
         details=f"Created admin user {created.username}",
         admin_id=current_user.id,
     )
@@ -330,7 +374,7 @@ def create_voter_user(
 ):
     command = CreateUserCommand(
         username=user.username,
-        password=user.password,
+        password=user.password or "voter123",
         full_name=user.full_name or user.username,
         phone=user.phone,
         email=user.email,
@@ -346,8 +390,8 @@ def create_voter_user(
         admin_username=current_user.username,
         action="CREATE_VOTER",
         target_type="VOTER",
-        target_id=created.username,
-        details=f"Created voter {created.username} ({created.full_name})",
+        target_id=str(created.username),
+        details=f"Created voter user {created.username}",
         admin_id=current_user.id,
     )
     return created
@@ -369,7 +413,7 @@ def upload_voters_csv(
         )
 
     try:
-        contents = file.file.read().decode("utf-8")
+        contents = file.file.read().decode("utf-8-sig")
         reader = csv.DictReader(io.StringIO(contents))
     except Exception as e:
         raise HTTPException(
@@ -378,20 +422,21 @@ def upload_voters_csv(
         )
 
     voters = []
+    skipped_rows = []
     try:
-        for row in reader:
-            username = row.get("username", "").strip()
+        for row_idx, row in enumerate(reader, start=2):
+            username = (row.get("username") or "").strip()
             # Skip empty or repeated header rows embedded in CSV
             if not username or username.lower() in ("username", "mcs_number", "mcs", "voter_id"):
                 continue
 
             voters.append({
                 "username": username,
-                "full_name": row.get("full_name", "").strip(),
-                "phone": row.get("phone", "").strip() or None,
-                "email": row.get("email", "").strip() or None,
-                "role": row.get("role", "voter").strip(),
-                "password": row.get("password", "").strip(),
+                "full_name": (row.get("full_name") or row.get("fullName") or "").strip(),
+                "phone": (row.get("phone") or row.get("phoneNo") or "").strip() or None,
+                "email": (row.get("email") or "").strip() or None,
+                "role": (row.get("role") or "voter").strip(),
+                "password": (row.get("password") or "").strip(),
             })
     except KeyError as e:
         raise HTTPException(
@@ -419,6 +464,102 @@ def upload_voters_csv(
         "created_usernames": [u.username for u in result["created"]],
         "skipped": len(result["skipped"]),
         "skipped_details": result["skipped"],
+    }
+
+
+# ============================================================
+# BULK DISQUALIFY VOTERS VIA CSV
+# ============================================================
+@router.post("/bulk-disqualify")
+def bulk_disqualify_voters(
+    file: UploadFile = File(...),
+    db: Session = Depends(database.get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
+):
+    """
+    Upload a CSV containing voter usernames (MCS numbers) to disqualify them (set is_active = False).
+    """
+    if not file.filename.endswith(".csv"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only CSV files are allowed.",
+        )
+
+    try:
+        contents = file.file.read().decode("utf-8-sig")
+        reader = csv.reader(io.StringIO(contents))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Error reading CSV file: {str(e)}",
+        )
+
+    raw_usernames = []
+    header_checked = False
+    username_col_idx = 0
+
+    for row in reader:
+        if not row or not any(field.strip() for field in row):
+            continue
+
+        if not header_checked:
+            header_checked = True
+            lowered = [col.strip().lower() for col in row]
+            for idx, col in enumerate(lowered):
+                if col in ("username", "mcs", "mcs_number", "voter_id", "mcs number"):
+                    username_col_idx = idx
+                    break
+            if any(h in lowered for h in ("username", "mcs", "mcs_number", "full_name", "name", "voter_id")):
+                continue
+
+        if username_col_idx < len(row):
+            val = row[username_col_idx].strip()
+            if val and val.lower() not in ("username", "mcs", "mcs_number", "voter_id"):
+                raw_usernames.append(val)
+
+    if not raw_usernames:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No valid usernames found in the uploaded CSV.",
+        )
+
+    unique_usernames = list(dict.fromkeys(raw_usernames))
+
+    matched_users = (
+        db.query(User)
+        .filter(User.username.in_(unique_usernames))
+        .all()
+    )
+
+    matched_usernames_set = {u.username for u in matched_users}
+    not_found = [u for u in unique_usernames if u not in matched_usernames_set]
+
+    disqualified_count = 0
+    for u in matched_users:
+        if u.role in ("admin", "super-admin"):
+            continue
+        u.is_active = False
+        disqualified_count += 1
+
+    db.commit()
+
+    cache.delete("voter_analysis")
+    cache.delete("all_users_list")
+    record_audit_log(
+        db=db,
+        admin_username=current_user.username,
+        action="BULK_DISQUALIFY_VOTERS",
+        target_type="VOTERS",
+        details=f"Disqualified {disqualified_count} voters via CSV upload (not found: {len(not_found)})",
+        admin_id=current_user.id,
+    )
+
+    return {
+        "message": f"Successfully disqualified {disqualified_count} voter(s).",
+        "disqualified_count": disqualified_count,
+        "disqualified_usernames": [u.username for u in matched_users if u.role == "voter"],
+        "not_found_count": len(not_found),
+        "not_found_usernames": not_found,
     }
 
 

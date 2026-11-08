@@ -1,3 +1,4 @@
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -15,7 +16,7 @@ class AdminLoginRequest(BaseModel):
 
 
 # ============================================================
-# ADMIN LOGIN (username + password, no OTP)
+# ADMIN LOGIN (username + password, no OTP, Single Session)
 # ============================================================
 @router.post("/admin/login", response_model=token_schemas.Token)
 def admin_login(
@@ -25,6 +26,8 @@ def admin_login(
     """
     Admin and super-admin login using username + password.
     OTP is NOT required for admin roles.
+    Enforces single-device login by issuing a new session_id and invalidating
+    prior sessions on other devices.
     """
     # ── 1. Look up the user by username
     user = (
@@ -59,9 +62,14 @@ def admin_login(
             detail="Your account is deactivated. Please contact the super-administrator.",
         )
 
-    # ── 5. Issue JWT access token
+    # ── 5. Issue new session ID to enforce single login instance
+    session_id = str(uuid.uuid4())
+    user.current_session_id = session_id
+    db.commit()
+
+    # ── 6. Issue JWT access token
     access_token = oauth2.create_access_token(
-        data={"user_id": str(user.id), "role": user.role}
+        data={"user_id": str(user.id), "role": user.role, "session_id": session_id}
     )
 
     return {

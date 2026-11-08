@@ -68,6 +68,7 @@ class ImportVotersHandler:
 
         for voter in command.voters:
             username = str(voter["username"]).strip()
+            full_name = str(voter.get("full_name", "")).strip()
             if not username:
                 continue
 
@@ -77,7 +78,11 @@ class ImportVotersHandler:
                 .first()
             )
             if existing_username:
-                skipped.append({"username": username, "reason": "Username already exists"})
+                skipped.append({
+                    "username": username,
+                    "full_name": full_name,
+                    "reason": "Username already exists in the system"
+                })
                 continue
 
             email = voter.get("email")
@@ -91,6 +96,7 @@ class ImportVotersHandler:
                 if existing_email:
                     skipped.append({
                         "username": username,
+                        "full_name": full_name,
                         "reason": f"Email '{email}' already belongs to another user"
                     })
                     continue
@@ -104,7 +110,7 @@ class ImportVotersHandler:
 
             new_user = models.User(
                 username=username,
-                full_name=voter.get("full_name", "").strip(),
+                full_name=full_name,
                 phone=phone,
                 email=email,
                 password=hashed_password,
@@ -120,7 +126,11 @@ class ImportVotersHandler:
                 created_users.append(new_user)
             except Exception as e:
                 self.db.rollback()
-                skipped.append({"username": username, "reason": f"Database error: {str(e)}"})
+                skipped.append({
+                    "username": username,
+                    "full_name": full_name,
+                    "reason": f"Database error: {str(e)}"
+                })
                 continue
 
         return {"created": created_users, "skipped": skipped}

@@ -23,6 +23,7 @@ def logout(
                 user = db.query(models.User).filter(models.User.id == user_id).first()
                 if user and user.role in ("admin", "super-admin"):
                     user.current_session_id = None
+                    user.last_active_at = None
                     db.commit()
         except Exception:
             pass

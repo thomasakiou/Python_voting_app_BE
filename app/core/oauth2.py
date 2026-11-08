@@ -1,5 +1,5 @@
 from jose import JWTError, jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -72,6 +72,24 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
                 detail="Admin session expired: A new login was initiated on another device.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+
+        # Keep active admin session alive and update activity timestamp (throttled to every 30s)
+        now = datetime.now(timezone.utc)
+        should_update = False
+        if user.last_active_at is None:
+            should_update = True
+        else:
+            last_active = user.last_active_at
+            if last_active.tzinfo is None:
+                last_active = last_active.replace(tzinfo=timezone.utc)
+            if (now - last_active).total_seconds() > 30:
+                should_update = True
+        if should_update:
+            user.last_active_at = now
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
 
     return user
 

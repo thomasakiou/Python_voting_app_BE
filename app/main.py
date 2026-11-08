@@ -71,6 +71,7 @@ def auto_upgrade_schema():
         "CREATE INDEX IF NOT EXISTS idx_votes_user_id ON votes(user_id);",
         "CREATE INDEX IF NOT EXISTS idx_votes_office_code ON votes(office_code);",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_session_id VARCHAR(255);",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMP WITH TIME ZONE;",
         "UPDATE users SET email = NULL WHERE role IN ('admin', 'super-admin') AND email IS NOT NULL;",
         """CREATE TABLE IF NOT EXISTS portal_locks (
             id INTEGER PRIMARY KEY DEFAULT 1,

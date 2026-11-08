@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     algorithm: str
     access_token_expire_minutes: int = 120
     admin_token_expire_minutes: int = 1440
+    admin_session_timeout_minutes: int = 15
     api_base_url: str = "http://localhost:8000/api"
     backend_host: str = "localhost"
     backend_port: str = "8000"

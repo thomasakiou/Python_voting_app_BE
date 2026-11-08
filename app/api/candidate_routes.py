@@ -1,6 +1,7 @@
 import os
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -216,7 +217,44 @@ async def upload_candidate_image(
     with open(file_path, "wb") as f:
         f.write(contents)
 
-    return {"image_url": f"/uploads/candidates/{filename}"}
+    # Return URL routed through candidates router so Nginx reverse proxies it cleanly
+    return {"image_url": f"/candidates/images/{filename}"}
+
+
+# ======================================
+# PUBLIC CANDIDATE IMAGE SERVING
+# ======================================
+@router.get("/images/{filename}")
+def serve_candidate_image(filename: str):
+    """
+    Publicly serves candidate portrait image files.
+    Allows browsers to load images via <img src="..." /> without authentication tokens.
+    """
+    safe_name = os.path.basename(filename)
+    candidates_dir = os.path.join("uploads", "candidates")
+    file_path = os.path.join(candidates_dir, safe_name)
+    if not os.path.exists(file_path):
+        # Fallback to root uploads folder
+        file_path = os.path.join("uploads", safe_name)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Candidate image not found")
+
+    ext = os.path.splitext(safe_name)[1].lower()
+    media_types = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+    }
+    media_type = media_types.get(ext, "image/jpeg")
+    return FileResponse(file_path, media_type=media_type, headers={"Cache-Control": "public, max-age=86400"})
+
+
+@router.get("/uploads/candidates/{filename}")
+def serve_candidate_upload_path_image(filename: str):
+    """Alias for candidates with legacy /uploads/candidates/... image paths."""
+    return serve_candidate_image(filename)
 
 
 # ======================================

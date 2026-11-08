@@ -133,6 +133,7 @@ app.add_middleware(
 
 os.makedirs("uploads/candidates", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/api/uploads", StaticFiles(directory="uploads"), name="api_uploads")
 
 
 @app.get("/")

@@ -10,6 +10,7 @@ from .api import (
     accreditation_routes as accreditation,
     audit_log_routes as audit_logs,
     voter_contact_routes as voter_contact,
+    portal_lock_routes as portal_locks,
 )
 from .api.auth import otp_login, admin_login, logout
 from .domain import user as models
@@ -71,6 +72,17 @@ def auto_upgrade_schema():
         "CREATE INDEX IF NOT EXISTS idx_votes_office_code ON votes(office_code);",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_session_id VARCHAR(255);",
         "UPDATE users SET email = NULL WHERE role IN ('admin', 'super-admin') AND email IS NOT NULL;",
+        """CREATE TABLE IF NOT EXISTS portal_locks (
+            id INTEGER PRIMARY KEY DEFAULT 1,
+            is_contact_update_locked BOOLEAN NOT NULL DEFAULT FALSE,
+            is_accreditation_locked BOOLEAN NOT NULL DEFAULT FALSE,
+            is_election_locked BOOLEAN NOT NULL DEFAULT FALSE,
+            contact_update_message VARCHAR(500) DEFAULT 'The Voter Contact Update portal is currently closed by the election administrator.',
+            accreditation_message VARCHAR(500) DEFAULT 'Voter Accreditation is currently closed by the election administrator.',
+            election_message VARCHAR(500) DEFAULT 'The Election portal is currently closed by the election administrator.',
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+        );""",
+        "INSERT INTO portal_locks (id, is_contact_update_locked, is_accreditation_locked, is_election_locked) VALUES (1, FALSE, FALSE, FALSE) ON CONFLICT (id) DO NOTHING;",
     ]
     try:
         with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
@@ -153,3 +165,4 @@ app.include_router(config.router)
 app.include_router(voting_time.router)
 app.include_router(audit_logs.router)
 app.include_router(voter_contact.router)
+app.include_router(portal_locks.router)

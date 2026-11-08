@@ -16,6 +16,7 @@ from ...core.otp_utils import (
 from ...domain import user as user_models
 from ...domain import otp as otp_models
 from ...domain import voting_time as vt_models
+from ...domain.portal_lock import PortalLock
 from ...schemas import otp as otp_schemas, token as token_schemas
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,13 @@ def initiate_login(
     Verifies eligibility, checks active election status, and sends a 6-digit OTP
     to their registered email with header 'NECO MCS Voting'.
     """
+    lock = db.query(PortalLock).filter(PortalLock.id == 1).first()
+    if lock and lock.is_election_locked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=lock.election_message or "The Election portal is currently closed by the election administrator.",
+        )
+
     username = credentials.username.strip()
 
     # 1. Look up user by username
@@ -168,6 +176,13 @@ def verify_otp(
     Accepts username + OTP code.
     If valid and not expired, returns a JWT access token.
     """
+    lock = db.query(PortalLock).filter(PortalLock.id == 1).first()
+    if lock and lock.is_election_locked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=lock.election_message or "The Election portal is currently closed by the election administrator.",
+        )
+
     username = payload.username.strip()
     otp_code = payload.otp_code.strip()
 

@@ -15,6 +15,7 @@ from ..core.otp_utils import (
 )
 from ..domain import user as user_models
 from ..domain import otp as otp_models
+from ..domain.portal_lock import PortalLock
 from ..schemas import otp as otp_schemas
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,13 @@ def validate_voter_for_accreditation(
     Validate 4-digit MCS number. If user exists and is active, returns
     voter's full name to be displayed in an uneditable field for confirmation.
     """
+    lock = db.query(PortalLock).filter(PortalLock.id == 1).first()
+    if lock and lock.is_accreditation_locked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=lock.accreditation_message or "Voter Accreditation is currently closed by the election administrator.",
+        )
+
     username = payload.username.strip()
     user = (
         db.query(user_models.User)
@@ -103,6 +111,13 @@ def send_accreditation_otp(
     Sends OTP to the voter's pre-registered email in the database.
     Does not accept arbitrary email input to prevent voter impersonation.
     """
+    lock = db.query(PortalLock).filter(PortalLock.id == 1).first()
+    if lock and lock.is_accreditation_locked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=lock.accreditation_message or "Voter Accreditation is currently closed by the election administrator.",
+        )
+
     username = payload.username.strip()
 
     user = (
@@ -209,6 +224,13 @@ def verify_accreditation_otp(
     Verifies the accreditation OTP. Only marks user as accredited without
     allowing client to overwrite the registered contact information.
     """
+    lock = db.query(PortalLock).filter(PortalLock.id == 1).first()
+    if lock and lock.is_accreditation_locked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=lock.accreditation_message or "Voter Accreditation is currently closed by the election administrator.",
+        )
+
     username = payload.username.strip()
     otp_code = payload.otp_code.strip()
 

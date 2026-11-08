@@ -13,6 +13,7 @@ from ..core.cache import cache
 from ..domain import user as user_models
 from ..domain import otp as otp_models
 from ..domain import dispute as dispute_models
+from ..domain.portal_lock import PortalLock
 from ..schemas import voter_contact as schemas
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,13 @@ def lookup_voter_contact(
     Returns voter's current contact info and flags indicating whether
     email and phone already exist (and are thus ineditable).
     """
+    lock = db.query(PortalLock).filter(PortalLock.id == 1).first()
+    if lock and lock.is_contact_update_locked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=lock.contact_update_message or "The Voter Contact Update portal is currently closed by the election administrator.",
+        )
+
     username = payload.username.strip()
     user = (
         db.query(user_models.User)
@@ -91,6 +99,13 @@ def send_contact_otp(
     - Data is NOT saved to the database at this point; it is temporarily stored with the OTP.
     - If email already exists, OTP is sent to the existing registered email.
     """
+    lock = db.query(PortalLock).filter(PortalLock.id == 1).first()
+    if lock and lock.is_contact_update_locked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=lock.contact_update_message or "The Voter Contact Update portal is currently closed by the election administrator.",
+        )
+
     username = payload.username.strip()
     user = (
         db.query(user_models.User)
@@ -226,6 +241,13 @@ def verify_contact_otp(
     ONLY after OTP is successfully verified are the new email and phone
     persisted into the database!
     """
+    lock = db.query(PortalLock).filter(PortalLock.id == 1).first()
+    if lock and lock.is_contact_update_locked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=lock.contact_update_message or "The Voter Contact Update portal is currently closed by the election administrator.",
+        )
+
     username = payload.username.strip()
     otp_code = payload.otp_code.strip()
 
@@ -354,6 +376,13 @@ def raise_voter_dispute(
     (e.g., incorrect email, incorrect phone, lost access).
     The dispute is queued for admin investigation and action.
     """
+    lock = db.query(PortalLock).filter(PortalLock.id == 1).first()
+    if lock and lock.is_contact_update_locked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=lock.contact_update_message or "The Voter Contact Update portal is currently closed by the election administrator.",
+        )
+
     username = payload.username.strip()
     reason = payload.reason.strip()
 

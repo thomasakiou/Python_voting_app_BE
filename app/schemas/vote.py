@@ -18,6 +18,7 @@ class VoteResponse(BaseModel):
     office_name: str
     office_code: Optional[str] = None
     candidate_code: Optional[str] = None
+    candidate_image_url: Optional[str] = None
     receipt_hash: Optional[str] = None
     created_at: datetime
 

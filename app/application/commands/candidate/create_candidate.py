@@ -1,13 +1,7 @@
 from dataclasses import dataclass
-from fastapi import HTTPException, status
-from ....domain import user as models
-from ....core import utils, config
-import csv
+from typing import Optional
 from fastapi import HTTPException, status
 from ....domain import candidate as models, office as model
-from ....core import utils
-from dataclasses import dataclass
-from typing import List
 
 
 @dataclass(frozen=True)
@@ -15,6 +9,7 @@ class CreateCandidateCommand:
     candidate_code: str
     name: str
     office_code: str
+    image_url: Optional[str] = None
 
 
 class CreateCandidateHandler:
@@ -32,13 +27,12 @@ class CreateCandidateHandler:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Office: {command.office_code} is not a valid office")
         
         new_candidate = models.Candidate(
-                            #    office_id=command.office_id,
-                               candidate_code=command.candidate_code, 
-                               name=command.name,
-                               office_code=command.office_code
-                                )
+            candidate_code=command.candidate_code, 
+            name=command.name,
+            office_code=command.office_code,
+            image_url=command.image_url,
+        )
         self.db.add(new_candidate)
         self.db.commit()
         self.db.refresh(new_candidate)
         return new_candidate
-    

@@ -1,4 +1,6 @@
+import os
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from .api import (
     user_routes as users,
     candidate_routes as candidates,
@@ -38,6 +40,7 @@ def auto_upgrade_schema():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS accredited_device_id VARCHAR(255);",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS device_info VARCHAR(255);",
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS is_disqualified BOOLEAN DEFAULT FALSE;",
+        "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS image_url TEXT;",
         "ALTER TABLE offices ADD COLUMN IF NOT EXISTS is_disqualified BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE votes ADD COLUMN IF NOT EXISTS receipt_hash VARCHAR(64);",
         "ALTER TABLE voting_times ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE;",
@@ -127,6 +130,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+os.makedirs("uploads/candidates", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
 @app.get("/")

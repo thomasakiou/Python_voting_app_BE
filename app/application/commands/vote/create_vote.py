@@ -132,6 +132,7 @@ class CastVoteHandler:
             "user_name": user.full_name,
             "candidate_name": candidate.name,
             "candidate_code": candidate.candidate_code,
+            "candidate_image_url": candidate.image_url,
             "office_name": office.description,
             "office_code": office.office_code,
             "receipt_hash": new_vote.receipt_hash,

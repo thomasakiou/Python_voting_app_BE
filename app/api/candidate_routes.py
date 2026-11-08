@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import os
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -32,6 +34,7 @@ def create_candidate(
         candidate_code=candidate.candidate_code,
         name=candidate.name,
         office_code=candidate.office_code,
+        image_url=candidate.image_url,
     )
     handler = CreateCandidateHandler(db)
     result = handler.handle(command)
@@ -161,6 +164,7 @@ def update_candidate(
         candidate_code=candidate.candidate_code,
         name=candidate.name,
         office_code=candidate.office_code,
+        image_url=candidate.image_url,
     )
     handler = UpdateCandidateHandler(db)
     result = handler.handle(command)
@@ -175,3 +179,64 @@ def update_candidate(
         admin_id=current_user.id,
     )
     return result
+
+
+# ======================================
+# UPLOAD CANDIDATE IMAGE
+# ======================================
+@router.post("/upload-image")
+async def upload_candidate_image(
+    file: UploadFile = File(...),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
+):
+    """Uploads a candidate portrait image and returns its URL."""
+    allowed_types = ["image/jpeg", "image/png", "image/webp", "image/jpg"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid image format. Allowed formats: JPG, PNG, WEBP",
+        )
+
+    contents = await file.read()
+    if len(contents) > 5 * 1024 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Image size exceeds 5MB limit",
+        )
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
+        ext = ".jpg"
+
+    filename = f"cand_{uuid.uuid4().hex[:12]}{ext}"
+    upload_dir = os.path.join("uploads", "candidates")
+    os.makedirs(upload_dir, exist_ok=True)
+    file_path = os.path.join(upload_dir, filename)
+
+    with open(file_path, "wb") as f:
+        f.write(contents)
+
+    return {"image_url": f"/uploads/candidates/{filename}"}
+
+
+# ======================================
+# UPLOAD IMAGE FOR EXISTING CANDIDATE
+# ======================================
+@router.post("/{id}/image", response_model=schemas.CandidateResponse)
+async def upload_candidate_image_by_id(
+    id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
+):
+    """Uploads and saves the image directly for a candidate."""
+    candidate = db.query(Candidate).filter(Candidate.id == id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    res = await upload_candidate_image(file=file, current_user=current_user)
+    candidate.image_url = res["image_url"]
+    db.commit()
+    db.refresh(candidate)
+    cache.clear()
+    return candidate

@@ -11,6 +11,7 @@ class Candidate(Base):
     id = Column(Integer, primary_key=True, nullable=False)
     candidate_code = Column(String(10), unique=True, nullable=False)
     name = Column(String(100), nullable=False)
+    image_url = Column(String, nullable=True)
     is_disqualified = Column(Boolean, default=False, nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text('now()'))
 

@@ -7,6 +7,7 @@ from ..schemas.office import OfficeOut
 class CandidateBase(BaseModel):
     candidate_code: str
     name: str
+    image_url: Optional[str] = None
     is_disqualified: Optional[bool] = False
 
     class Config:

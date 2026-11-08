@@ -17,6 +17,45 @@ class AdminLoginRequest(BaseModel):
     username: str
     password: str
     device_id: Optional[str] = None
+    force: Optional[bool] = False
+
+
+# ============================================================
+# CHECK ADMIN ACTIVE SESSION STATUS (Public for login page)
+# ============================================================
+@router.get("/admin/session-status")
+def get_admin_session_status(db: Session = Depends(database.get_db)):
+    """
+    Checks if an administrator session is currently active.
+    Used by the login page to display an alert if another session is already open.
+    """
+    admin_user = (
+        db.query(user_models.User)
+        .filter(user_models.User.role.in_(["admin", "super-admin"]))
+        .filter(user_models.User.current_session_id.isnot(None))
+        .first()
+    )
+    if not admin_user:
+        return {"has_active_session": False}
+
+    # Check if the active session has been abandoned for more than 2 hours
+    if admin_user.last_active_at is not None:
+        now = datetime.now(timezone.utc)
+        last_active = admin_user.last_active_at
+        if last_active.tzinfo is None:
+            last_active = last_active.replace(tzinfo=timezone.utc)
+        if (now - last_active).total_seconds() > 7200:  # 2 hours
+            # Session expired due to prolonged inactivity
+            admin_user.current_session_id = None
+            admin_user.device_info = None
+            admin_user.last_active_at = None
+            db.commit()
+            return {"has_active_session": False}
+
+    return {
+        "has_active_session": True,
+        "message": "Another admin session is currently logged in. You cannot log in until that session logs out.",
+    }
 
 
 # ============================================================
@@ -66,25 +105,26 @@ def admin_login(
             detail="Your account is deactivated. Please contact the super-administrator.",
         )
 
-    # ── 5. Enforce single-device priority:
-    # The first device to log in gets priority.
-    # When Device A is logged in, Device B cannot log in until Device A logs out.
-    # When Device B is logged in, Device A cannot log in until Device B logs out.
+    # ── 5. Enforce single-session rule:
+    # When one session is logged in, do not log in a second person.
+    # Alert them that another admin session is logged in so they cannot login.
     now = datetime.now(timezone.utc)
-    if user.current_session_id:
-        client_device_id = credentials.device_id.strip() if credentials.device_id else None
-        stored_device_id = user.device_info.strip() if user.device_info else None
+    if user.current_session_id and not credentials.force:
+        is_active = True
+        if user.last_active_at is not None:
+            last_active = user.last_active_at
+            if last_active.tzinfo is None:
+                last_active = last_active.replace(tzinfo=timezone.utc)
+            if (now - last_active).total_seconds() > 7200:
+                is_active = False
 
-        # Allow re-login on the exact same device only
-        is_same_device = bool(client_device_id and stored_device_id and client_device_id == stored_device_id)
-
-        if not is_same_device:
+        if is_active:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    "An active administrator session is already running on another device. "
-                    "Only one device can be logged in at a time. "
-                    "Please log out from the active device first before logging in here."
+                    "Another administrator session is currently logged in. "
+                    "Only one admin session is allowed at a time. "
+                    "You cannot log in until that session logs out."
                 ),
             )
 

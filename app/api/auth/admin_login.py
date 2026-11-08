@@ -1,4 +1,5 @@
 import uuid
+from typing import Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -15,6 +16,7 @@ router = APIRouter(tags=["Admin Login"])
 class AdminLoginRequest(BaseModel):
     username: str
     password: str
+    device_id: Optional[str] = None
 
 
 # ============================================================
@@ -64,24 +66,19 @@ def admin_login(
             detail="Your account is deactivated. Please contact the super-administrator.",
         )
 
-    # ── 5. Enforce single-device priority: do not allow second device to log in if active session exists
+    # ── 5. Enforce single-device priority:
+    # The first device to log in gets priority.
+    # When Device A is logged in, Device B cannot log in until Device A logs out.
+    # When Device B is logged in, Device A cannot log in until Device B logs out.
     now = datetime.now(timezone.utc)
     if user.current_session_id:
-        is_active_session = False
-        if user.last_active_at is not None:
-            last_active = user.last_active_at
-            if last_active.tzinfo is None:
-                last_active = last_active.replace(tzinfo=timezone.utc)
-            inactivity_duration = (now - last_active).total_seconds()
-            timeout_seconds = getattr(settings, "admin_session_timeout_minutes", 15) * 60
-            if inactivity_duration < timeout_seconds:
-                is_active_session = True
-        else:
-            # If current_session_id is present but last_active_at was not recorded,
-            # allow this login to establish the new session with last_active_at tracked.
-            is_active_session = False
+        client_device_id = credentials.device_id.strip() if credentials.device_id else None
+        stored_device_id = user.device_info.strip() if user.device_info else None
 
-        if is_active_session:
+        # Allow re-login on the exact same device only
+        is_same_device = bool(client_device_id and stored_device_id and client_device_id == stored_device_id)
+
+        if not is_same_device:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
@@ -91,9 +88,11 @@ def admin_login(
                 ),
             )
 
-    # ── 6. Issue new session ID to enforce single login instance
+    # ── 6. Issue new session ID and bind to this device
     session_id = str(uuid.uuid4())
     user.current_session_id = session_id
+    if credentials.device_id:
+        user.device_info = credentials.device_id.strip()
     user.last_active_at = now
     db.commit()
 

@@ -91,25 +91,33 @@ def get_my_stats(
 
 
 # ============================================================
-# ADMIN: LIVE VOTES FEED
+# ADMIN: LIVE VOTES FEED WITH PAGINATION
 # ============================================================
 @router.get("/live")
 def get_live_votes_summary(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
 ):
     """
-    Returns live vote counter and latest 20 cast votes for the admin live dashboard.
+    Returns live vote counter and paginated cast votes for the admin live dashboard.
+    Scales smoothly even with thousands or tens of thousands of cast ballots.
     """
     total_votes = db.query(Vote).count()
+    offset = (page - 1) * page_size
     recent_votes = (
         db.query(Vote)
         .order_by(Vote.created_at.desc())
-        .limit(20)
+        .offset(offset)
+        .limit(page_size)
         .all()
     )
     return {
         "total_votes_cast": total_votes,
+        "total_items": total_votes,
+        "page": page,
+        "page_size": page_size,
         "recent_votes": [
             {
                 "id": v.id,

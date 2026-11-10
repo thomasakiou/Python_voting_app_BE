@@ -38,13 +38,14 @@ def get_admin_session_status(db: Session = Depends(database.get_db)):
     if not admin_user:
         return {"has_active_session": False}
 
-    # Check if the active session has been abandoned for more than 2 hours
+    # Check if the active session has been abandoned longer than the session timeout
+    timeout_seconds = getattr(settings, "admin_session_timeout_minutes", 15) * 60
     if admin_user.last_active_at is not None:
         now = datetime.now(timezone.utc)
         last_active = admin_user.last_active_at
         if last_active.tzinfo is None:
             last_active = last_active.replace(tzinfo=timezone.utc)
-        if (now - last_active).total_seconds() > 7200:  # 2 hours
+        if (now - last_active).total_seconds() > timeout_seconds:
             # Session expired due to prolonged inactivity
             admin_user.current_session_id = None
             admin_user.device_info = None
@@ -106,27 +107,34 @@ def admin_login(
         )
 
     # ── 5. Enforce single-session rule:
-    # When one session is logged in, do not log in a second person.
-    # Alert them that another admin session is logged in so they cannot login.
+    # When one session is logged in, do not log in a second person unless force=True.
+    # If the login is coming from the SAME device, allow re-login to recover the session.
     now = datetime.now(timezone.utc)
     if user.current_session_id and not credentials.force:
-        is_active = True
-        if user.last_active_at is not None:
-            last_active = user.last_active_at
-            if last_active.tzinfo is None:
-                last_active = last_active.replace(tzinfo=timezone.utc)
-            if (now - last_active).total_seconds() > 7200:
-                is_active = False
+        is_same_device = bool(
+            credentials.device_id
+            and user.device_info
+            and credentials.device_id.strip() == user.device_info.strip()
+        )
+        if not is_same_device:
+            timeout_seconds = getattr(settings, "admin_session_timeout_minutes", 15) * 60
+            is_active = True
+            if user.last_active_at is not None:
+                last_active = user.last_active_at
+                if last_active.tzinfo is None:
+                    last_active = last_active.replace(tzinfo=timezone.utc)
+                if (now - last_active).total_seconds() > timeout_seconds:
+                    is_active = False
 
-        if is_active:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "Another administrator session is currently logged in. "
-                    "Only one admin session is allowed at a time. "
-                    "You cannot log in until that session logs out."
-                ),
-            )
+            if is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Another administrator session is currently logged in. "
+                        "Only one admin session is allowed at a time. "
+                        "You cannot log in until that session logs out."
+                    ),
+                )
 
     # ── 6. Issue new session ID and bind to this device
     session_id = str(uuid.uuid4())

@@ -342,7 +342,7 @@ def create_admin_user(
 ):
     command = CreateUserCommand(
         username=user.username,
-        password=user.password,
+        password=user.password or "admin123",
         full_name=user.full_name or user.username,
         phone=user.phone,
         email=user.email,

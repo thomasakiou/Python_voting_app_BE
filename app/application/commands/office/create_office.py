@@ -11,9 +11,9 @@ from typing import List
 
 @dataclass(frozen=True)
 class CreateOfficeCommand:
-    # id: int
     office_code: str
     description: str
+    max_votes: int = 1
 
 
 class CreateOfficeHandler:
@@ -23,12 +23,14 @@ class CreateOfficeHandler:
     def handle(self, command: CreateOfficeCommand):
         existing = self.db.query(models.Office).filter(models.Office.office_code.ilike(f"%{command.office_code}%")).first()
         if existing:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Office code already exists")
 
+        max_votes = max(1, command.max_votes if command.max_votes is not None else 1)
         new_office = models.Office(
-                               office_code=command.office_code, 
-                               description=command.description,
-                                )
+            office_code=command.office_code, 
+            description=command.description,
+            max_votes=max_votes,
+        )
         self.db.add(new_office)
         self.db.commit()
         self.db.refresh(new_office)

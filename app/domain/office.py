@@ -11,6 +11,7 @@ class Office(Base):
     id = Column(Integer, primary_key=True, nullable=False)
     office_code = Column(String(20), unique=True, nullable=False)
     description = Column(String(100), nullable=False)
+    max_votes = Column(Integer, default=1, nullable=False, server_default=text('1'))
     is_disqualified = Column(Boolean, default=False, nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text('now()'))
 

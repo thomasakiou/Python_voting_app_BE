@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 from fastapi import HTTPException, status
 from ....domain import office as models
 
@@ -7,6 +8,7 @@ class UpdateOfficeCommand:
     office_id: int
     office_code: str
     description: str
+    max_votes: Optional[int] = None
 
 class UpdateOfficeHandler:
     def __init__(self, db):
@@ -18,16 +20,11 @@ class UpdateOfficeHandler:
         if not office:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Office not found")
 
-        # email_exists = self.db.query(models.Office).filter(models.Office.email == command.email).first()
-        # if email_exists and email_exists.id != command.user_id:
-        #     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already taken")
-
-        # office_query.update({"office_code": command.office_code, 
-        #                      "description": command.description})
-
         office.office_code = command.office_code
         office.description = command.description
+        if command.max_votes is not None:
+            office.max_votes = max(1, command.max_votes)
 
         self.db.commit()
         self.db.refresh(office)
-        return office_query.first()
+        return office

@@ -30,6 +30,7 @@ def create_office(
     command = CreateOfficeCommand(
         office_code=office.office_code,
         description=office.description,
+        max_votes=office.max_votes if office.max_votes is not None else 1,
     )
     handler = CreateOfficeHandler(db)
     result = handler.handle(command)
@@ -144,6 +145,7 @@ def update_office(
         office_id=id,
         office_code=office.office_code,
         description=office.description,
+        max_votes=office.max_votes,
     )
     handler = UpdateOfficeHandler(db)
     result = handler.handle(command)

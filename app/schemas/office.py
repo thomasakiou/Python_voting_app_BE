@@ -6,6 +6,7 @@ from datetime import datetime
 class OfficeBase(BaseModel):
     office_code: str
     description: str
+    max_votes: Optional[int] = 1
     is_disqualified: Optional[bool] = False
 
     class Config:
@@ -13,12 +14,15 @@ class OfficeBase(BaseModel):
 
 
 class OfficeCreate(OfficeBase):
+    max_votes: Optional[int] = 1
+
     class Config:
         from_attributes = True
 
 
 class OfficeResponse(OfficeBase):
     id: int
+    max_votes: int = 1
     created_at: datetime
 
     class Config:
@@ -28,6 +32,7 @@ class OfficeResponse(OfficeBase):
 class OfficeUpdate(BaseModel):
     office_code: Optional[str] = None
     description: Optional[str] = None
+    max_votes: Optional[int] = None
     is_disqualified: Optional[bool] = None
 
     class Config:
@@ -37,6 +42,7 @@ class OfficeUpdate(BaseModel):
 class OfficeOut(BaseModel):
     office_code: str
     description: str
+    max_votes: Optional[int] = 1
     is_disqualified: Optional[bool] = False
 
     class Config:

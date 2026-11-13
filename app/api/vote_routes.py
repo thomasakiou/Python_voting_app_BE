@@ -29,6 +29,7 @@ def cast_vote(
     command = CastVoteCommand(
         user_id=current_user.id,
         candidate_code=vote.candidate_code,
+        candidate_codes=vote.candidate_codes,
         office_code=vote.office_code,
     )
     handler = CastVoteHandler(db)
@@ -66,15 +67,15 @@ def get_my_stats(
     """
     total_offices = db.query(Office).filter(Office.is_disqualified == False).count()
     user_votes = db.query(Vote).filter(Vote.user_id == current_user.id).all()
-    voted_office_codes = [v.office_code for v in user_votes]
+    voted_office_codes = list(set([v.office_code for v in user_votes]))
 
     return {
         "voter_name": current_user.full_name,
         "username": current_user.username,
         "total_offices": total_offices,
-        "voted_count": len(user_votes),
-        "remaining_count": max(0, total_offices - len(user_votes)),
-        "is_completed": len(user_votes) >= total_offices and total_offices > 0,
+        "voted_count": len(voted_office_codes),
+        "remaining_count": max(0, total_offices - len(voted_office_codes)),
+        "is_completed": len(voted_office_codes) >= total_offices and total_offices > 0,
         "voted_office_codes": voted_office_codes,
         "votes": [
             {

@@ -42,6 +42,7 @@ def auto_upgrade_schema():
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS is_disqualified BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS image_url TEXT;",
         "ALTER TABLE offices ADD COLUMN IF NOT EXISTS is_disqualified BOOLEAN DEFAULT FALSE;",
+        "ALTER TABLE offices ADD COLUMN IF NOT EXISTS max_votes INTEGER DEFAULT 1 NOT NULL;",
         "ALTER TABLE votes ADD COLUMN IF NOT EXISTS receipt_hash VARCHAR(64);",
         "ALTER TABLE voting_times ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE voting_times ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'NOT_STARTED';",

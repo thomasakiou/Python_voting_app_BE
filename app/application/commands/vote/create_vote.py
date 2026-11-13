@@ -2,6 +2,7 @@ import hashlib
 import secrets
 from datetime import datetime, timezone
 from dataclasses import dataclass
+from typing import Optional, List
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -12,8 +13,9 @@ from ....core.cache import cache
 @dataclass(frozen=True)
 class CastVoteCommand:
     user_id: int
-    candidate_code: str
     office_code: str
+    candidate_code: Optional[str] = None
+    candidate_codes: Optional[List[str]] = None
 
 
 class CastVoteHandler:
@@ -74,26 +76,35 @@ class CastVoteHandler:
                 detail=f"The office/category '{office.description}' has been disqualified."
             )
 
-        # 5. Check candidate validity & disqualification
-        candidate = self.db.query(cand_models.Candidate).filter(
-            cand_models.Candidate.candidate_code == command.candidate_code
-        ).first()
-        if not candidate:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found.")
+        # 5. Extract chosen candidates list
+        chosen_codes: List[str] = []
+        if command.candidate_codes:
+            chosen_codes = [c.strip() for c in command.candidate_codes if c and str(c).strip()]
+        elif command.candidate_code:
+            chosen_codes = [command.candidate_code.strip()]
 
-        if candidate.is_disqualified:
+        if not chosen_codes:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Candidate '{candidate.name}' has been disqualified and cannot receive votes."
+                detail="No candidate selected. Please select at least one candidate."
             )
 
-        if candidate.office_code != office.office_code:
+        # 6. Ensure voter cannot vote for the same candidate twice
+        if len(chosen_codes) != len(set(chosen_codes)):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Candidate does not belong to this office."
+                detail="You cannot vote for the same candidate more than once."
             )
 
-        # 6. Ensure user hasn’t already voted for this office
+        # 7. Check max allowed selections for this office
+        max_allowed = getattr(office, "max_votes", 1) or 1
+        if len(chosen_codes) > max_allowed:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"You can select a maximum of {max_allowed} candidate(s) for {office.description}. You selected {len(chosen_codes)}."
+            )
+
+        # 8. Ensure user hasn’t already voted for this office
         existing_vote = self.db.query(models.Vote).filter(
             models.Vote.user_id == command.user_id,
             models.Vote.office_code == office.office_code
@@ -101,42 +112,83 @@ class CastVoteHandler:
         if existing_vote:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"You have already voted for {office.description}. Each voter can vote only once per office."
+                detail=f"You have already voted for {office.description}. Each voter can vote only once per office contest."
             )
 
-        # 7. Generate cryptographic vote receipt hash (Requirement 9)
-        salt = secrets.token_hex(4)
-        receipt_raw = f"{user.username}:{office.office_code}:{candidate.candidate_code}:{datetime.now(timezone.utc).isoformat()}:{salt}"
-        receipt_hash = "MCS-" + hashlib.sha256(receipt_raw.encode()).hexdigest()[:12].upper()
+        # 9. Check each candidate's validity & disqualification
+        validated_candidates = []
+        for cand_code in chosen_codes:
+            candidate = self.db.query(cand_models.Candidate).filter(
+                cand_models.Candidate.candidate_code == cand_code
+            ).first()
+            if not candidate:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Candidate '{cand_code}' not found."
+                )
 
-        # 8. Create vote
-        new_vote = models.Vote(
-            user_id=command.user_id,
-            user_name=user.username,
-            office_code=office.office_code,
-            office_name=office.description,
-            candidate_code=candidate.candidate_code,
-            candidate_name=candidate.name,
-            receipt_hash=receipt_hash,
-        )
-        self.db.add(new_vote)
+            if candidate.is_disqualified:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Candidate '{candidate.name}' has been disqualified and cannot receive votes."
+                )
+
+            if candidate.office_code != office.office_code:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Candidate '{candidate.name}' does not belong to {office.description}."
+                )
+            validated_candidates.append(candidate)
+
+        # 10. Generate cryptographic vote receipt hashes & create vote records
+        created_votes = []
+        receipt_hashes = []
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        for cand in validated_candidates:
+            salt = secrets.token_hex(4)
+            receipt_raw = f"{user.username}:{office.office_code}:{cand.candidate_code}:{now_iso}:{salt}"
+            receipt_hash = "MCS-" + hashlib.sha256(receipt_raw.encode()).hexdigest()[:12].upper()
+            receipt_hashes.append(receipt_hash)
+
+            new_vote = models.Vote(
+                user_id=command.user_id,
+                user_name=user.username,
+                office_code=office.office_code,
+                office_name=office.description,
+                candidate_code=cand.candidate_code,
+                candidate_name=cand.name,
+                receipt_hash=receipt_hash,
+            )
+            self.db.add(new_vote)
+            created_votes.append(new_vote)
+
         self.db.commit()
-        self.db.refresh(new_vote)
+        for v in created_votes:
+            self.db.refresh(v)
 
         # Invalidate results cache for this office and general cache
         cache.delete(f"results_{office.office_code}")
         cache.delete("voter_analysis")
 
+        primary_vote = created_votes[0]
+        combined_candidate_names = ", ".join([c.name for c in validated_candidates])
+        combined_candidate_codes = ", ".join([c.candidate_code for c in validated_candidates])
+        combined_receipt_hashes = ", ".join(receipt_hashes)
+        first_img = validated_candidates[0].image_url if len(validated_candidates) == 1 else None
+
         return {
-            "id": new_vote.id,
+            "id": primary_vote.id,
             "username": user.username,
             "user_name": user.username,
             "full_name": user.full_name,
-            "candidate_name": candidate.name,
-            "candidate_code": candidate.candidate_code,
-            "candidate_image_url": candidate.image_url,
+            "candidate_name": combined_candidate_names,
+            "candidate_code": combined_candidate_codes,
+            "candidate_image_url": first_img,
+            "candidate_codes": [c.candidate_code for c in validated_candidates],
+            "receipt_hashes": receipt_hashes,
             "office_name": office.description,
             "office_code": office.office_code,
-            "receipt_hash": new_vote.receipt_hash,
-            "created_at": new_vote.created_at,
+            "receipt_hash": combined_receipt_hashes,
+            "created_at": primary_vote.created_at,
         }

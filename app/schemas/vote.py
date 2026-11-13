@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 
@@ -7,7 +7,8 @@ from datetime import datetime
 # VOTE SCHEMA
 # ========================================
 class VoteCreate(BaseModel):
-    candidate_code: str
+    candidate_code: Optional[str] = None
+    candidate_codes: Optional[List[str]] = None
     office_code: str
 
 
@@ -20,6 +21,8 @@ class VoteResponse(BaseModel):
     candidate_code: Optional[str] = None
     candidate_image_url: Optional[str] = None
     receipt_hash: Optional[str] = None
+    candidate_codes: Optional[List[str]] = None
+    receipt_hashes: Optional[List[str]] = None
     created_at: datetime
 
     class Config:

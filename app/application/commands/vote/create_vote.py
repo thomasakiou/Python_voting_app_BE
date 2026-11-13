@@ -163,9 +163,16 @@ class CastVoteHandler:
             self.db.add(new_vote)
             created_votes.append(new_vote)
 
-        self.db.commit()
-        for v in created_votes:
-            self.db.refresh(v)
+        try:
+            self.db.commit()
+            for v in created_votes:
+                self.db.refresh(v)
+        except Exception as db_err:
+            self.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Database error while recording ballot: {str(db_err)}"
+            )
 
         # Invalidate results cache for this office and general cache
         cache.delete(f"results_{office.office_code}")

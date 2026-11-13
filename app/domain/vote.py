@@ -22,7 +22,7 @@ class Vote(Base):
     office = relationship("Office", back_populates="votes")
     candidate = relationship("Candidate", back_populates="votes")
 
-    # Prevent a user from voting more than once for the same office
+    # Prevent a user from voting more than once for the same candidate in an office
     __table_args__ = (
-        UniqueConstraint("user_id", "office_code", name="unique_vote_per_office"),
+        UniqueConstraint("user_id", "office_code", "candidate_code", name="unique_vote_per_candidate"),
     )

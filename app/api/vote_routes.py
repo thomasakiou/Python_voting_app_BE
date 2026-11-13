@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from typing import List, Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..domain.vote import Vote
 from ..domain.office import Office
@@ -108,6 +108,7 @@ def get_live_votes_summary(
     offset = (page - 1) * page_size
     recent_votes = (
         db.query(Vote)
+        .options(joinedload(Vote.user))
         .order_by(Vote.created_at.desc())
         .offset(offset)
         .limit(page_size)
@@ -121,7 +122,9 @@ def get_live_votes_summary(
         "recent_votes": [
             {
                 "id": v.id,
-                "user_name": v.user_name,
+                "username": v.user.username if v.user else v.user_name,
+                "user_name": v.user.username if v.user else v.user_name,
+                "full_name": v.user.full_name if v.user else v.user_name,
                 "office_name": v.office_name,
                 "candidate_name": v.candidate_name,
                 "receipt_hash": v.receipt_hash,

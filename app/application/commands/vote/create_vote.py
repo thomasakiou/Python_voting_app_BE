@@ -112,7 +112,7 @@ class CastVoteHandler:
         # 8. Create vote
         new_vote = models.Vote(
             user_id=command.user_id,
-            user_name=user.full_name,
+            user_name=user.username,
             office_code=office.office_code,
             office_name=office.description,
             candidate_code=candidate.candidate_code,
@@ -129,7 +129,9 @@ class CastVoteHandler:
 
         return {
             "id": new_vote.id,
-            "user_name": user.full_name,
+            "username": user.username,
+            "user_name": user.username,
+            "full_name": user.full_name,
             "candidate_name": candidate.name,
             "candidate_code": candidate.candidate_code,
             "candidate_image_url": candidate.image_url,

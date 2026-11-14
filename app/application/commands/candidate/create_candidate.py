@@ -10,6 +10,8 @@ class CreateCandidateCommand:
     name: str
     office_code: str
     image_url: Optional[str] = None
+    manifesto_title: Optional[str] = None
+    manifesto: Optional[str] = None
 
 
 class CreateCandidateHandler:
@@ -31,6 +33,8 @@ class CreateCandidateHandler:
             name=command.name,
             office_code=command.office_code,
             image_url=command.image_url,
+            manifesto_title=command.manifesto_title,
+            manifesto=command.manifesto,
         )
         self.db.add(new_candidate)
         self.db.commit()

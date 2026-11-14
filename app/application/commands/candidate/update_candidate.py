@@ -10,6 +10,8 @@ class UpdateCandidateCommand:
     name: str
     office_code: str
     image_url: Optional[str] = None
+    manifesto_title: Optional[str] = None
+    manifesto: Optional[str] = None
 
 class UpdateCandidateHandler:
     def __init__(self, db):
@@ -29,6 +31,8 @@ class UpdateCandidateHandler:
             "candidate_code": command.candidate_code, 
             "name": command.name,
             "office_code": command.office_code,
+            "manifesto_title": command.manifesto_title,
+            "manifesto": command.manifesto,
         }
         if command.image_url is not None:
             update_data["image_url"] = command.image_url

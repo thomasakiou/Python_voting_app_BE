@@ -9,6 +9,8 @@ class CandidateBase(BaseModel):
     name: str
     image_url: Optional[str] = None
     is_disqualified: Optional[bool] = False
+    manifesto_title: Optional[str] = None
+    manifesto: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -13,6 +13,8 @@ class Candidate(Base):
     name = Column(String(100), nullable=False)
     image_url = Column(String, nullable=True)
     is_disqualified = Column(Boolean, default=False, nullable=False)
+    manifesto_title = Column(String(255), nullable=True)
+    manifesto = Column(String, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text('now()'))
 
     office_code = Column(String, ForeignKey("offices.office_code", ondelete="CASCADE"))

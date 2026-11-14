@@ -36,6 +36,8 @@ def create_candidate(
         name=candidate.name,
         office_code=candidate.office_code,
         image_url=candidate.image_url,
+        manifesto_title=candidate.manifesto_title,
+        manifesto=candidate.manifesto,
     )
     handler = CreateCandidateHandler(db)
     result = handler.handle(command)
@@ -166,6 +168,8 @@ def update_candidate(
         name=candidate.name,
         office_code=candidate.office_code,
         image_url=candidate.image_url,
+        manifesto_title=candidate.manifesto_title,
+        manifesto=candidate.manifesto,
     )
     handler = UpdateCandidateHandler(db)
     result = handler.handle(command)

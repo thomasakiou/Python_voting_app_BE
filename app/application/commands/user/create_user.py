@@ -115,7 +115,10 @@ class ImportVotersHandler:
             phone = phone.strip() if phone else None
 
             default_pw = voter.get("password") or config.DEFAULT_VOTER_PASSWORD
-            hashed_password = utils.hash_password(default_pw)
+            if default_pw and default_pw.startswith(("$2b$", "$2a$", "$2y$")):
+                hashed_password = default_pw
+            else:
+                hashed_password = utils.hash_password(default_pw)
             role = voter.get("role", "voter").strip()
 
             staff_file_no = str(voter.get("staff_file_no") or voter.get("file_no") or voter.get("Staff_file_no") or "").strip() or None

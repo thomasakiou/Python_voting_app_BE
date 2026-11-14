@@ -413,6 +413,20 @@ def create_voter_user(
     return created
 
 
+def decode_csv_content(file_bytes: bytes) -> str:
+    """
+    Robust multi-encoding decoder for uploaded CSV files.
+    Tries utf-8-sig, utf-8, windows-1252 (CP1252 for Excel smart quotes/apostrophes),
+    latin-1, iso-8859-1, and falls back to utf-8 with error replacement.
+    """
+    for enc in ("utf-8-sig", "utf-8", "windows-1252", "latin-1", "iso-8859-1"):
+        try:
+            return file_bytes.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return file_bytes.decode("utf-8", errors="replace")
+
+
 # ============================================================
 # UPLOAD USER-CSV (VOTER)
 # ============================================================
@@ -429,7 +443,8 @@ def upload_voters_csv(
         )
 
     try:
-        contents = file.file.read().decode("utf-8-sig")
+        raw_bytes = file.file.read()
+        contents = decode_csv_content(raw_bytes)
         reader = csv.DictReader(io.StringIO(contents))
     except Exception as e:
         raise HTTPException(
@@ -461,7 +476,7 @@ def upload_voters_csv(
             file_no = get_val("staff_file_no", "Staff_file_no", "file_no", "fileno", "file_number", "staff_file_number") or None
             station = get_val("staff_station", "Staff_station", "station", "Station", "location") or None
             rank = get_val("staff_rank", "Staff_rank", "rank", "Rank", "designation", "position") or None
-            conraiss = get_val("staff_conraiss", "Staff_conraiss", "conraiss", "CONRAISS", "level", "grade") or None
+            conraiss = get_val("staff_conraiss", "Staff_conraiss", "conraiss", "CONRAISS", "staff_conr", "Staff_conr", "conr", "CONR", "level", "grade") or None
             active_val = get_val("staff_active", "Staff_active", "active", "status", "staff_status", "is_active")
 
             voters.append({
@@ -525,7 +540,8 @@ def bulk_disqualify_voters(
         )
 
     try:
-        contents = file.file.read().decode("utf-8-sig")
+        raw_bytes = file.file.read()
+        contents = decode_csv_content(raw_bytes)
         reader = csv.reader(io.StringIO(contents))
     except Exception as e:
         raise HTTPException(

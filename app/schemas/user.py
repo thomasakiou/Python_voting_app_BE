@@ -17,6 +17,11 @@ class UserBase(BaseModel):
     full_name: str
     phone: Optional[str] = None
     email: Optional[str] = None
+    staff_file_no: Optional[str] = None
+    staff_station: Optional[str] = None
+    staff_rank: Optional[str] = None
+    staff_conraiss: Optional[str] = None
+    staff_active: Optional[bool] = True
 
 
 class UserCreate(BaseModel):
@@ -25,6 +30,11 @@ class UserCreate(BaseModel):
     full_name: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
+    staff_file_no: Optional[str] = None
+    staff_station: Optional[str] = None
+    staff_rank: Optional[str] = None
+    staff_conraiss: Optional[str] = None
+    staff_active: Optional[bool] = True
 
     class Config:
         from_attributes = True
@@ -37,6 +47,11 @@ class UserResponse(UserBase):
     is_active: bool = True
     is_accredited: bool = False
     accredited_at: Optional[datetime] = None
+    staff_file_no: Optional[str] = None
+    staff_station: Optional[str] = None
+    staff_rank: Optional[str] = None
+    staff_conraiss: Optional[str] = None
+    staff_active: Optional[bool] = True
 
     class Config:
         from_attributes = True
@@ -52,6 +67,26 @@ class UserOut(UserBase):
     accredited_device_id: Optional[str] = None
     device_info: Optional[str] = None
     email: Optional[str] = None
+    staff_file_no: Optional[str] = None
+    staff_station: Optional[str] = None
+    staff_rank: Optional[str] = None
+    staff_conraiss: Optional[str] = None
+    staff_active: Optional[bool] = True
+
+    class Config:
+        from_attributes = True
+
+
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[UserRole] = None
+    staff_file_no: Optional[str] = None
+    staff_station: Optional[str] = None
+    staff_rank: Optional[str] = None
+    staff_conraiss: Optional[str] = None
+    staff_active: Optional[bool] = None
 
     class Config:
         from_attributes = True

@@ -55,6 +55,9 @@ def apply_user_filters(
                 User.full_name.ilike(term),
                 User.phone.ilike(term),
                 User.email.ilike(term),
+                User.staff_file_no.ilike(term),
+                User.staff_station.ilike(term),
+                User.staff_rank.ilike(term),
             )
         )
 
@@ -160,12 +163,16 @@ def export_voters_csv(
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        "MCS Number (Username)",
-        "Full Name",
-        "Phone Number",
-        "Email Address",
+        "Username",
+        "Staff_full_name",
+        "Staff_file_no",
+        "Staff_station",
+        "Staff_rank",
+        "staff_conraiss",
+        "staff_phone",
+        "staff_email",
+        "Staff_active",
         "Accredited",
-        "Active",
         "Eligibility Status",
         "Date Accredited",
         "Registered At"
@@ -177,10 +184,14 @@ def export_voters_csv(
         writer.writerow([
             v.username,
             v.full_name,
+            v.staff_file_no or "",
+            v.staff_station or "",
+            v.staff_rank or "",
+            v.staff_conraiss or "",
             v.phone or "",
             v.email or "",
+            "YES" if v.staff_active else "NO",
             "YES" if v.is_accredited else "NO",
-            "ACTIVE" if v.is_active else "DISABLED",
             eligibility_label,
             v.accredited_at.strftime("%Y-%m-%d %H:%M:%S") if v.accredited_at else "",
             v.created_at.strftime("%Y-%m-%d %H:%M:%S") if v.created_at else ""
@@ -380,6 +391,11 @@ def create_voter_user(
         email=user.email,
         role="voter",
         must_change_password=True,
+        staff_file_no=user.staff_file_no,
+        staff_station=user.staff_station,
+        staff_rank=user.staff_rank,
+        staff_conraiss=user.staff_conraiss,
+        staff_active=user.staff_active if user.staff_active is not None else True,
     )
     handler = CreateUserHandler(db)
     created = handler.handle(command)
@@ -425,18 +441,41 @@ def upload_voters_csv(
     skipped_rows = []
     try:
         for row_idx, row in enumerate(reader, start=2):
-            username = (row.get("username") or "").strip()
+            # Helper to find column matching any of the variant names (case-insensitive & trimmed)
+            def get_val(*variants):
+                for v in variants:
+                    target = v.lower().replace("_", "").replace(" ", "")
+                    for k, val in row.items():
+                        if k and k.strip().lower().replace("_", "").replace(" ", "") == target:
+                            return str(val).strip() if val is not None else ""
+                return ""
+
+            username = get_val("username", "mcs_number", "mcs", "voter_id", "user_name")
             # Skip empty or repeated header rows embedded in CSV
             if not username or username.lower() in ("username", "mcs_number", "mcs", "voter_id"):
                 continue
 
+            full_name = get_val("full_name", "Staff_full_name", "staff_full_name", "name", "staff_name", "fullName")
+            phone = get_val("phone", "staff_phone", "Staff_phone", "phoneNo", "mobile", "telephone") or None
+            email = get_val("email", "staff_email", "Staff_email") or None
+            file_no = get_val("staff_file_no", "Staff_file_no", "file_no", "fileno", "file_number", "staff_file_number") or None
+            station = get_val("staff_station", "Staff_station", "station", "Station", "location") or None
+            rank = get_val("staff_rank", "Staff_rank", "rank", "Rank", "designation", "position") or None
+            conraiss = get_val("staff_conraiss", "Staff_conraiss", "conraiss", "CONRAISS", "level", "grade") or None
+            active_val = get_val("staff_active", "Staff_active", "active", "status", "staff_status", "is_active")
+
             voters.append({
                 "username": username,
-                "full_name": (row.get("full_name") or row.get("fullName") or "").strip(),
-                "phone": (row.get("phone") or row.get("phoneNo") or "").strip() or None,
-                "email": (row.get("email") or "").strip() or None,
-                "role": (row.get("role") or "voter").strip(),
-                "password": (row.get("password") or "").strip(),
+                "full_name": full_name or username,
+                "phone": phone,
+                "email": email,
+                "role": (get_val("role") or "voter"),
+                "password": (get_val("password") or ""),
+                "staff_file_no": file_no,
+                "staff_station": station,
+                "staff_rank": rank,
+                "staff_conraiss": conraiss,
+                "staff_active": active_val,
             })
     except KeyError as e:
         raise HTTPException(
@@ -630,6 +669,87 @@ def delete_user(
         admin_id=current_user.id,
     )
     return result
+
+
+# ============================================================
+# UPDATE USER DETAILS (ADMIN)
+# ============================================================
+@router.put("/{user_id}", response_model=schemas.UserOut)
+@router.patch("/{user_id}", response_model=schemas.UserOut)
+def update_user_details(
+    user_id: int,
+    payload: schemas.UserUpdate,
+    db: Session = Depends(database.get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if payload.full_name is not None:
+        user.full_name = payload.full_name.strip()
+    if payload.phone is not None:
+        user.phone = payload.phone.strip() if payload.phone else None
+    if payload.email is not None:
+        user.email = payload.email.strip().lower() if payload.email else None
+    if payload.role is not None:
+        user.role = payload.role
+    if payload.staff_file_no is not None:
+        user.staff_file_no = payload.staff_file_no.strip() if payload.staff_file_no else None
+    if payload.staff_station is not None:
+        user.staff_station = payload.staff_station.strip() if payload.staff_station else None
+    if payload.staff_rank is not None:
+        user.staff_rank = payload.staff_rank.strip() if payload.staff_rank else None
+    if payload.staff_conraiss is not None:
+        user.staff_conraiss = payload.staff_conraiss.strip() if payload.staff_conraiss else None
+    if payload.staff_active is not None:
+        user.staff_active = payload.staff_active
+
+    db.commit()
+    db.refresh(user)
+    cache.delete("voter_analysis")
+    cache.delete("all_users_list")
+    record_audit_log(
+        db=db,
+        admin_username=current_user.username,
+        action="UPDATE_USER",
+        target_type="USER",
+        target_id=str(user.username),
+        details=f"Admin updated user {user.username} ({user.full_name})",
+        admin_id=current_user.id,
+    )
+    return user
+
+
+# ============================================================
+# TOGGLE STAFF ACTIVE STATUS
+# ============================================================
+@router.patch("/{user_id}/staff-status", response_model=schemas.UserOut)
+def toggle_staff_active_status(
+    user_id: int,
+    staff_active: bool = Query(...),
+    db: Session = Depends(database.get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    user.staff_active = staff_active
+    db.commit()
+    db.refresh(user)
+    cache.delete("voter_analysis")
+    cache.delete("all_users_list")
+    record_audit_log(
+        db=db,
+        admin_username=current_user.username,
+        action="TOGGLE_STAFF_ACTIVE",
+        target_type="USER",
+        target_id=str(user.username),
+        details=f"Admin set staff_active={staff_active} for staff {user.username} ({user.full_name})",
+        admin_id=current_user.id,
+    )
+    return user
 
 
 # ============================================================

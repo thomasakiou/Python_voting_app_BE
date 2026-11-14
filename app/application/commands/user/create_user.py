@@ -16,6 +16,11 @@ class CreateUserCommand:
     email: Optional[str] = None
     role: str = "voter"
     must_change_password: bool = True
+    staff_file_no: Optional[str] = None
+    staff_station: Optional[str] = None
+    staff_rank: Optional[str] = None
+    staff_conraiss: Optional[str] = None
+    staff_active: bool = True
 
 
 class CreateUserHandler:
@@ -46,6 +51,11 @@ class CreateUserHandler:
             is_active=True,
             is_accredited=False,
             must_change_password=command.must_change_password,
+            staff_file_no=command.staff_file_no.strip() if command.staff_file_no else None,
+            staff_station=command.staff_station.strip() if command.staff_station else None,
+            staff_rank=command.staff_rank.strip() if command.staff_rank else None,
+            staff_conraiss=command.staff_conraiss.strip() if command.staff_conraiss else None,
+            staff_active=command.staff_active if command.staff_active is not None else True,
         )
         self.db.add(new_user)
         self.db.commit()
@@ -108,6 +118,17 @@ class ImportVotersHandler:
             hashed_password = utils.hash_password(default_pw)
             role = voter.get("role", "voter").strip()
 
+            staff_file_no = str(voter.get("staff_file_no") or voter.get("file_no") or voter.get("Staff_file_no") or "").strip() or None
+            staff_station = str(voter.get("staff_station") or voter.get("station") or voter.get("Staff_station") or "").strip() or None
+            staff_rank = str(voter.get("staff_rank") or voter.get("rank") or voter.get("Staff_rank") or "").strip() or None
+            staff_conraiss = str(voter.get("staff_conraiss") or voter.get("conraiss") or voter.get("CONRAISS") or voter.get("Staff_conraiss") or "").strip() or None
+
+            raw_active = str(voter.get("staff_active") if voter.get("staff_active") is not None else (voter.get("active") if voter.get("active") is not None else voter.get("Staff_active", ""))).strip().lower()
+            if raw_active in ("no", "false", "0", "inactive", "n"):
+                staff_active = False
+            else:
+                staff_active = True
+
             new_user = models.User(
                 username=username,
                 full_name=full_name,
@@ -118,6 +139,11 @@ class ImportVotersHandler:
                 is_active=True,
                 is_accredited=False,
                 must_change_password=True,
+                staff_file_no=staff_file_no,
+                staff_station=staff_station,
+                staff_rank=staff_rank,
+                staff_conraiss=staff_conraiss,
+                staff_active=staff_active,
             )
             self.db.add(new_user)
             try:

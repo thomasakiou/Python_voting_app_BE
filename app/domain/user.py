@@ -25,4 +25,11 @@ class User(Base):
     role = Column(Enum("super-admin", "admin", "voter", name="user_roles"), default="voter", nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text('now()'))
 
+    # Staff Information Fields
+    staff_file_no = Column(String(100), nullable=True)
+    staff_station = Column(String(150), nullable=True)
+    staff_rank = Column(String(150), nullable=True)
+    staff_conraiss = Column(String(50), nullable=True)
+    staff_active = Column(Boolean, default=True, nullable=False, server_default=text('true'))
+
     votes = relationship("Vote", back_populates="user")

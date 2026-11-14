@@ -66,6 +66,12 @@ def lookup_voter_contact(
             detail="Your account has been deactivated / disqualified. Please contact the administrator.",
         )
 
+    if user.staff_active is False:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your staff status is marked as Inactive. Inactive staff members are not permitted to update contact details. Please contact the administrator.",
+        )
+
     has_email = bool(user.email and user.email.strip())
     has_phone = bool(user.phone and user.phone.strip())
 
@@ -76,6 +82,11 @@ def lookup_voter_contact(
         phone=user.phone if has_phone else None,
         masked_email=mask_email(user.email) if has_email else None,
         masked_phone=mask_phone(user.phone) if has_phone else None,
+        staff_file_no=user.staff_file_no,
+        staff_station=user.staff_station,
+        staff_rank=user.staff_rank,
+        staff_conraiss=user.staff_conraiss,
+        staff_active=user.staff_active if user.staff_active is not None else True,
         has_email=has_email,
         has_phone=has_phone,
         is_accredited=user.is_accredited,

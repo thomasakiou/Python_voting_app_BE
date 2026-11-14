@@ -32,6 +32,32 @@ class AccreditationValidateResponse(BaseModel):
     email: Optional[str] = None
     masked_phone: Optional[str] = None
     masked_email: Optional[str] = None
+    staff_file_no: Optional[str] = None
+    staff_station: Optional[str] = None
+    staff_rank: Optional[str] = None
+    staff_conraiss: Optional[str] = None
+    staff_active: Optional[bool] = True
+    message: Optional[str] = None
+
+
+class ElectionVoterLookupRequest(BaseModel):
+    username: str
+
+
+class ElectionVoterLookupResponse(BaseModel):
+    username: str
+    full_name: str
+    staff_file_no: Optional[str] = None
+    staff_station: Optional[str] = None
+    staff_rank: Optional[str] = None
+    staff_conraiss: Optional[str] = None
+    staff_active: Optional[bool] = True
+    is_accredited: bool
+    is_active: bool
+    has_email: bool
+    has_phone: bool
+    masked_email: Optional[str] = None
+    masked_phone: Optional[str] = None
     message: Optional[str] = None
 
 

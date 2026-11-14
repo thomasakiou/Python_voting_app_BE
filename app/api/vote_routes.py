@@ -4,6 +4,9 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..domain.vote import Vote
 from ..domain.office import Office
+from ..domain.user import User
+from ..domain.voting_time import VotingTime
+from ..application.queries.vote.count_all_votes import CountVotesQuery, CountVotesHandler
 from ..core.database import get_db
 from ..core.config import settings
 from ..application.commands.vote.create_vote import CastVoteCommand, CastVoteHandler
@@ -88,6 +91,87 @@ def get_my_stats(
             }
             for v in user_votes
         ],
+    }
+
+
+# ============================================================
+# CONTESTANTS' AGENTS / OBSERVER: ANONYMIZED LIVE MONITOR
+# ============================================================
+@router.get("/agents/live")
+@router.get("/observer/live")
+def get_agents_live_monitor(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(15, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """
+    Public / Agent live monitoring view.
+    Provides complete live transparency into the election process while
+    strictly protecting voter secrecy: NO voter names, NO MCS numbers, NO IDs.
+    """
+    # 1. Total Votes & Accreditation
+    total_votes = db.query(Vote).count()
+    total_voters = db.query(User).filter(User.role == "voter").count()
+    accredited_count = db.query(User).filter(User.role == "voter", User.is_accredited == True).count()
+
+    # 2. Voting Status & Window
+    voting_time = db.query(VotingTime).first()
+    is_active = voting_time.is_active if voting_time else False
+    status_label = voting_time.status if voting_time else "NOT_STARTED"
+    end_time = voting_time.end_time if voting_time else None
+
+    # 3. Anonymized Recent Ballots (Zero Voter Identity)
+    offset = (page - 1) * page_size
+    recent_votes = (
+        db.query(Vote)
+        .order_by(Vote.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
+
+    anonymized_ballots = [
+        {
+            "id": v.id,
+            "receipt_hash": v.receipt_hash or f"MCS-VERIFIED-{v.id:04d}",
+            "office_name": v.office_name,
+            "candidate_name": v.candidate_name,
+            "created_at": v.created_at,
+        }
+        for v in recent_votes
+    ]
+
+    # 4. Office Results & Real-time Tallies
+    offices = db.query(Office).filter(Office.is_disqualified == False).all()
+    offices_results = []
+    for off in offices:
+        query = CountVotesQuery(office_code=off.office_code)
+        handler = CountVotesHandler(db)
+        cand_results = handler.handle(query)
+        office_total = sum(c["vote_count"] for c in cand_results)
+        offices_results.append({
+            "office_code": off.office_code,
+            "description": off.description,
+            "max_votes": off.max_votes or 1,
+            "total_votes": office_total,
+            "candidates": cand_results,
+        })
+
+    turnout_pct = round((accredited_count / total_voters * 100), 1) if total_voters > 0 else 0.0
+
+    return {
+        "status": status_label,
+        "is_active": is_active,
+        "end_time": end_time,
+        "total_votes_cast": total_votes,
+        "total_voters": total_voters,
+        "accredited_voters": accredited_count,
+        "turnout_percentage": turnout_pct,
+        "page": page,
+        "page_size": page_size,
+        "total_ballots": total_votes,
+        "recent_ballots": anonymized_ballots,
+        "offices_results": offices_results,
     }
 
 

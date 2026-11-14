@@ -14,6 +14,11 @@ class VoterContactLookupResponse(BaseModel):
     phone: Optional[str] = None
     masked_email: Optional[str] = None
     masked_phone: Optional[str] = None
+    staff_file_no: Optional[str] = None
+    staff_station: Optional[str] = None
+    staff_rank: Optional[str] = None
+    staff_conraiss: Optional[str] = None
+    staff_active: Optional[bool] = True
     has_email: bool
     has_phone: bool
     is_accredited: bool

@@ -161,7 +161,62 @@ def initiate_login(
         "has_phone": has_phone,
         "username": user.username,
         "full_name": user.full_name,
+        "staff_file_no": user.staff_file_no,
+        "staff_station": user.staff_station,
+        "staff_rank": user.staff_rank,
+        "staff_conraiss": user.staff_conraiss,
+        "staff_active": user.staff_active if user.staff_active is not None else True,
     }
+
+
+# ============================================================
+# PRE-LOGIN VOTER LOOKUP (Display staff profile on /election)
+# ============================================================
+@router.post("/election/lookup-voter", response_model=otp_schemas.ElectionVoterLookupResponse)
+def lookup_voter_for_election(
+    credentials: otp_schemas.ElectionVoterLookupRequest,
+    db: Session = Depends(database.get_db),
+):
+    """
+    Looks up voter staff information by MCS number before or during election login.
+    """
+    username = credentials.username.strip()
+    user = (
+        db.query(user_models.User)
+        .filter(user_models.User.username == username)
+        .first()
+    )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Voter with MCS number '{username}' not found. Please verify your number.",
+        )
+
+    if user.role in ("admin", "super-admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrators must log in via /admin/login.",
+        )
+
+    has_email = bool(user.email and user.email.strip())
+    has_phone = bool(user.phone and user.phone.strip())
+
+    return otp_schemas.ElectionVoterLookupResponse(
+        username=user.username,
+        full_name=user.full_name,
+        staff_file_no=user.staff_file_no,
+        staff_station=user.staff_station,
+        staff_rank=user.staff_rank,
+        staff_conraiss=user.staff_conraiss,
+        staff_active=user.staff_active if user.staff_active is not None else True,
+        is_accredited=user.is_accredited,
+        is_active=user.is_active,
+        has_email=has_email,
+        has_phone=has_phone,
+        masked_email=mask_email(user.email) if has_email else None,
+        masked_phone=mask_phone(user.phone) if has_phone else None,
+        message="Voter record loaded successfully.",
+    )
 
 
 # ============================================================

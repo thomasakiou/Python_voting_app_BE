@@ -94,6 +94,11 @@ def validate_voter_for_accreditation(
         email=masked_email_val,
         masked_phone=masked_phone_val,
         masked_email=masked_email_val,
+        staff_file_no=user.staff_file_no,
+        staff_station=user.staff_station,
+        staff_rank=user.staff_rank,
+        staff_conraiss=user.staff_conraiss,
+        staff_active=user.staff_active if user.staff_active is not None else True,
         message="Voter identity confirmed. Please review your details and request your OTP.",
     )
 

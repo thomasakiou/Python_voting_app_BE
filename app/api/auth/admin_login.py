@@ -167,7 +167,9 @@ class AgentLoginRequest(BaseModel):
 # AGENT LOGIN (username + password alone, No OTP, No device lock)
 # ============================================================
 @router.post("/agents/login", response_model=token_schemas.Token)
+@router.post("/agents/login/", response_model=token_schemas.Token)
 @router.post("/agent/login", response_model=token_schemas.Token)
+@router.post("/agent/login/", response_model=token_schemas.Token)
 def agent_login(
     credentials: AgentLoginRequest,
     db: Session = Depends(database.get_db),

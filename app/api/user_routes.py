@@ -388,6 +388,7 @@ def create_admin_user(
 # CREATE USER (AGENT)
 # ============================================================
 @router.post("/agent", response_model=schemas.UserOut)
+@router.post("/agent/", response_model=schemas.UserOut)
 def create_agent_user(
     user: schemas.UserCreate,
     db: Session = Depends(database.get_db),

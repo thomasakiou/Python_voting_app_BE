@@ -38,6 +38,7 @@ def auto_upgrade_schema():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_accredited BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS accredited_at TIMESTAMP WITH TIME ZONE;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS accredited_device_id VARCHAR(255);",
+        "ALTER TYPE user_roles ADD VALUE IF NOT EXISTS 'agent';",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS device_info VARCHAR(255);",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_file_no VARCHAR(100);",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_station VARCHAR(150);",

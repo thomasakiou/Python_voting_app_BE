@@ -152,5 +152,70 @@ def admin_login(
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "fullname": user.full_name,
+        "fullname": user.full_name or user.username,
+        "role": user.role,
+        "username": user.username,
     }
+
+
+class AgentLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+# ============================================================
+# AGENT LOGIN (username + password alone, No OTP, No device lock)
+# ============================================================
+@router.post("/agents/login", response_model=token_schemas.Token)
+@router.post("/agent/login", response_model=token_schemas.Token)
+def agent_login(
+    credentials: AgentLoginRequest,
+    db: Session = Depends(database.get_db),
+):
+    """
+    Agent login using username + password alone.
+    No OTP, no device binding required.
+    Agents and administrators can log in here to view the live election monitor.
+    """
+    cleaned_username = credentials.username.strip()
+    user = (
+        db.query(user_models.User)
+        .filter(user_models.User.username == cleaned_username)
+        .first()
+    )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid username or password",
+        )
+
+    if user.role not in ("agent", "admin", "super-admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access restricted: This portal is for accredited election agents and administrators.",
+        )
+
+    if not utils.verify_password(credentials.password, user.password):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid username or password",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your agent account is deactivated. Please contact the administrator.",
+        )
+
+    access_token = oauth2.create_access_token(
+        data={"user_id": str(user.id), "role": user.role}
+    )
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "fullname": user.full_name or user.username,
+        "role": user.role,
+        "username": user.username,
+    }
+

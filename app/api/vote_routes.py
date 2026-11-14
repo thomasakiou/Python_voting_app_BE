@@ -103,6 +103,7 @@ def get_agents_live_monitor(
     page: int = Query(1, ge=1),
     page_size: int = Query(15, ge=1, le=100),
     db: Session = Depends(get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin", "agent"])),
 ):
     """
     Public / Agent live monitoring view.

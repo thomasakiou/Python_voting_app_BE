@@ -23,8 +23,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
         expire = datetime.utcnow() + expires_delta
     else:
         role = to_encode.get("role")
-        if role in ("admin", "super-admin"):
-            # 24 hours (1440 minutes) for admins to monitor the election without session expiration
+        if role in ("admin", "super-admin", "agent"):
+            # 24 hours (1440 minutes) for admins and agents to monitor the election without session expiration
             admin_minutes = getattr(settings, "admin_token_expire_minutes", 1440)
             expire = datetime.utcnow() + timedelta(minutes=admin_minutes)
         else:

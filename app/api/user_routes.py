@@ -41,9 +41,11 @@ def apply_user_filters(
     role: Optional[str] = None,
     status: Optional[str] = None,
     accreditation: Optional[str] = None,
+    staff_status: Optional[str] = None,
 ):
-    if role and role != "all":
-        query = query.filter(User.role == role)
+    if role:
+        if role != "all":
+            query = query.filter(User.role == role)
     else:
         query = query.filter(User.role == "voter")
 
@@ -76,6 +78,12 @@ def apply_user_filters(
             query = query.filter(User.is_accredited == True)
         elif accreditation in ("pending", "unaccredited"):
             query = query.filter(User.is_accredited == False)
+
+    if staff_status and staff_status != "all":
+        if staff_status in ("active", "yes", "true"):
+            query = query.filter(User.staff_active == True)
+        elif staff_status in ("inactive", "no", "false"):
+            query = query.filter(User.staff_active == False)
 
     return query
 
@@ -150,6 +158,7 @@ def export_voters_csv(
     role: Optional[str] = None,
     status: Optional[str] = None,
     accreditation: Optional[str] = None,
+    staff_status: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
 ):
@@ -157,7 +166,7 @@ def export_voters_csv(
     Download a CSV file containing voters matching the selected filters.
     """
     query = db.query(User)
-    query = apply_user_filters(query, search=search, role=role, status=status, accreditation=accreditation)
+    query = apply_user_filters(query, search=search, role=role, status=status, accreditation=accreditation, staff_status=staff_status)
     voters = query.order_by(User.username.asc()).all()
 
     output = io.StringIO()
@@ -214,6 +223,7 @@ def export_voters_pdf(
     role: Optional[str] = None,
     status: Optional[str] = None,
     accreditation: Optional[str] = None,
+    staff_status: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
 ):
@@ -234,7 +244,7 @@ def export_voters_pdf(
     import html
 
     query = db.query(User)
-    query = apply_user_filters(query, search=search, role=role, status=status, accreditation=accreditation)
+    query = apply_user_filters(query, search=search, role=role, status=status, accreditation=accreditation, staff_status=staff_status)
     voters = query.order_by(User.username.asc()).all()
 
     buffer = io.BytesIO()
@@ -369,6 +379,45 @@ def create_admin_user(
         target_type="ADMIN",
         target_id=str(created.username),
         details=f"Created admin user {created.username}",
+        admin_id=current_user.id,
+    )
+    return created
+
+
+# ============================================================
+# CREATE USER (AGENT)
+# ============================================================
+@router.post("/agent", response_model=schemas.UserOut)
+def create_agent_user(
+    user: schemas.UserCreate,
+    db: Session = Depends(database.get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
+):
+    command = CreateUserCommand(
+        username=user.username,
+        password=user.password or "agent123",
+        full_name=user.full_name or user.username,
+        phone=user.phone,
+        email=user.email,
+        role="agent",
+        must_change_password=False,
+        staff_file_no=user.staff_file_no,
+        staff_station=user.staff_station,
+        staff_rank=user.staff_rank,
+        staff_conraiss=user.staff_conraiss,
+        staff_active=user.staff_active if user.staff_active is not None else True,
+    )
+    handler = CreateUserHandler(db)
+    created = handler.handle(command)
+    cache.delete("voter_analysis")
+    cache.delete("all_users_list")
+    record_audit_log(
+        db=db,
+        admin_username=current_user.username,
+        action="CREATE_AGENT",
+        target_type="AGENT",
+        target_id=str(created.username),
+        details=f"Created agent user {created.username}",
         admin_id=current_user.id,
     )
     return created

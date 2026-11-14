@@ -7,6 +7,7 @@ class UserRole(str, PyEnum):
     super_admin = "super-admin"
     admin = "admin"
     voter = "voter"
+    agent = "agent"
 
 
 # ===============================================================================================
@@ -30,6 +31,7 @@ class UserCreate(BaseModel):
     full_name: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
+    role: Optional[UserRole] = UserRole.voter
     staff_file_no: Optional[str] = None
     staff_station: Optional[str] = None
     staff_rank: Optional[str] = None

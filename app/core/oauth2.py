@@ -64,8 +64,9 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if not user:
         raise credentials_exception
 
-    # Enforce single session for admin accounts
-    if user.role in ("admin", "super-admin") and user.current_session_id:
+    # Enforce single session for regular admin accounts
+    # Super-admin accounts are exempt so super-admin can log in at anytime across devices/tabs
+    if user.role == "admin" and user.current_session_id:
         if token_data.session_id != user.current_session_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -90,6 +91,15 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
                 db.commit()
             except Exception:
                 db.rollback()
+
+    elif user.role == "super-admin":
+        # Keep super-admin last active updated without locking to a single session_id
+        now = datetime.now(timezone.utc)
+        user.last_active_at = now
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
 
     return user
 

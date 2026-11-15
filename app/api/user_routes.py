@@ -868,6 +868,9 @@ def update_user_details(
     if payload.staff_active is not None:
         user.staff_active = payload.staff_active
 
+    if payload.admin_login_count is not None:
+        user.admin_login_count = payload.admin_login_count
+
     if payload.password is not None and payload.password.strip():
         user.password = utils.hash_password(payload.password.strip())
 
@@ -882,6 +885,44 @@ def update_user_details(
         target_type="USER",
         target_id=str(user.username),
         details=f"Admin updated user {user.username} (formerly {old_username})",
+        admin_id=current_user.id,
+    )
+    return user
+
+
+# ============================================================
+# RESET ADMIN LOGIN COUNT (Super Admin Only)
+# ============================================================
+@router.post("/{user_id}/reset-admin-login", response_model=schemas.UserOut)
+@router.post("/{user_id}/reset-admin-login/", response_model=schemas.UserOut)
+def reset_admin_login(
+    user_id: int,
+    db: Session = Depends(database.get_db),
+    current_user=Depends(oauth2.role_required(["super-admin"])),
+):
+    """
+    Resets the login count of a single-use admin account so they can log in once more.
+    Super-admin only.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only admin accounts have single-use login restrictions")
+
+    user.admin_login_count = 0
+    user.current_session_id = None
+    user.last_active_at = None
+    db.commit()
+    db.refresh(user)
+    cache.delete("all_users_list")
+    record_audit_log(
+        db=db,
+        admin_username=current_user.username,
+        action="RESET_ADMIN_LOGIN",
+        target_type="ADMIN",
+        target_id=str(user.username),
+        details=f"Super admin reset single-use login status for admin {user.username} (can log in once more)",
         admin_id=current_user.id,
     )
     return user

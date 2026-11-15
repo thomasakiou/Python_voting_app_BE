@@ -3,6 +3,7 @@ from typing import Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from pydantic import BaseModel
 
 from ...core import database, utils, oauth2
@@ -26,12 +27,12 @@ class AdminLoginRequest(BaseModel):
 @router.get("/admin/session-status")
 def get_admin_session_status(db: Session = Depends(database.get_db)):
     """
-    Checks if an administrator session is currently active.
-    Used by the login page to display an alert if another session is already open.
+    Checks if a regular administrator session is currently active.
+    Super-admin is exempt and can log in at anytime.
     """
     admin_user = (
         db.query(user_models.User)
-        .filter(user_models.User.role.in_(["admin", "super-admin"]))
+        .filter(user_models.User.role == "admin")
         .filter(user_models.User.current_session_id.isnot(None))
         .first()
     )
@@ -55,7 +56,7 @@ def get_admin_session_status(db: Session = Depends(database.get_db)):
 
     return {
         "has_active_session": True,
-        "message": "Another admin session is currently logged in. You cannot log in until that session logs out.",
+        "message": "An administrator session is currently active. (Super-admin may log in at anytime).",
     }
 
 
@@ -69,14 +70,15 @@ def admin_login(
 ):
     """
     Admin and super-admin login using username + password.
-    OTP is NOT required for admin roles.
-    Enforces single-device login with priority to the first logged-in device:
-    A second device is not allowed to log in while an active session exists.
+    - Super-admin: Can log in at ANYTIME without session or count restrictions.
+    - Admin (created by super-admin): Can ONLY log in ONCE (single-use admin account).
+      Once used, they cannot log in again unless the super-admin creates another account.
     """
-    # ── 1. Look up the user by username
+    # ── 1. Look up the user by username (case-insensitive)
+    cleaned_username = credentials.username.strip()
     user = (
         db.query(user_models.User)
-        .filter(user_models.User.username == credentials.username)
+        .filter(func.lower(user_models.User.username) == func.lower(cleaned_username))
         .first()
     )
     if not user:
@@ -106,11 +108,24 @@ def admin_login(
             detail="Your account is deactivated. Please contact the super-administrator.",
         )
 
-    # ── 5. Enforce single-session rule:
-    # When one session is logged in, do not log in a second person unless force=True.
-    # If the login is coming from the SAME device, allow re-login to recover the session.
+    # ── 5. SINGLE-LOGIN RULE FOR ADMINS CREATED BY SUPER ADMIN
+    # Super-admin accounts can log in at anytime without limit.
+    # Regular admin accounts created by super-admin can ONLY log in once.
+    if user.role == "admin":
+        if (user.admin_login_count or 0) >= 1:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "This admin account has already been used to log in. "
+                    "Single-use admin accounts can only log in once. "
+                    "Please contact the super administrator to create a new admin account."
+                ),
+            )
+
     now = datetime.now(timezone.utc)
-    if user.current_session_id and not credentials.force:
+
+    # ── 6. Single session concurrency check (for admin accounts only, super admin is never blocked)
+    if user.role == "admin" and user.current_session_id and not credentials.force:
         is_same_device = bool(
             credentials.device_id
             and user.device_info
@@ -136,15 +151,20 @@ def admin_login(
                     ),
                 )
 
-    # ── 6. Issue new session ID and bind to this device
+    # ── 7. Issue new session ID, increment login count for single-use admin, and bind device
     session_id = str(uuid.uuid4())
     user.current_session_id = session_id
     if credentials.device_id:
         user.device_info = credentials.device_id.strip()
     user.last_active_at = now
+
+    # Admin account single-use increment
+    if user.role == "admin":
+        user.admin_login_count = (user.admin_login_count or 0) + 1
+
     db.commit()
 
-    # ── 7. Issue JWT access token
+    # ── 8. Issue JWT access token
     access_token = oauth2.create_access_token(
         data={"user_id": str(user.id), "role": user.role, "session_id": session_id}
     )

@@ -87,6 +87,7 @@ class CreateUserHandler:
             staff_rank=command.staff_rank.strip() if command.staff_rank and command.staff_rank.strip() else None,
             staff_conraiss=command.staff_conraiss.strip() if command.staff_conraiss and command.staff_conraiss.strip() else None,
             staff_active=command.staff_active if command.staff_active is not None else True,
+            admin_login_count=0,
         )
         self.db.add(new_user)
         self.db.commit()

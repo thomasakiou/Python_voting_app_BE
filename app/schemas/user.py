@@ -54,6 +54,7 @@ class UserResponse(UserBase):
     staff_rank: Optional[str] = None
     staff_conraiss: Optional[str] = None
     staff_active: Optional[bool] = True
+    admin_login_count: Optional[int] = 0
 
     class Config:
         from_attributes = True
@@ -74,6 +75,7 @@ class UserOut(UserBase):
     staff_rank: Optional[str] = None
     staff_conraiss: Optional[str] = None
     staff_active: Optional[bool] = True
+    admin_login_count: Optional[int] = 0
 
     class Config:
         from_attributes = True
@@ -91,6 +93,7 @@ class UserUpdate(BaseModel):
     staff_rank: Optional[str] = None
     staff_conraiss: Optional[str] = None
     staff_active: Optional[bool] = None
+    admin_login_count: Optional[int] = None
 
     class Config:
         from_attributes = True

@@ -22,6 +22,7 @@ class User(Base):
     current_session_id = Column(String(255), nullable=True)
     last_active_at = Column(TIMESTAMP(timezone=True), nullable=True)
     must_change_password = Column(Boolean, default=True)
+    admin_login_count = Column(Integer, default=0, nullable=False, server_default=text('0'))
     role = Column(Enum("super-admin", "admin", "voter", "agent", name="user_roles"), default="voter", nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text('now()'))
 

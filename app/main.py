@@ -70,6 +70,22 @@ def auto_upgrade_schema():
         SET mcs_number = candidate_code
         WHERE mcs_number IS NULL OR mcs_number = '';
         """,
+        # Ensure partial unique index on staff_file_no so duplicate file numbers are rejected
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_indexes WHERE indexname = 'uq_users_staff_file_no'
+            ) THEN
+                UPDATE users SET staff_file_no = NULL WHERE TRIM(COALESCE(staff_file_no, '')) = '';
+                IF NOT EXISTS (
+                    SELECT 1 FROM users WHERE staff_file_no IS NOT NULL GROUP BY LOWER(TRIM(staff_file_no)) HAVING COUNT(*) > 1
+                ) THEN
+                    CREATE UNIQUE INDEX uq_users_staff_file_no ON users (LOWER(TRIM(staff_file_no))) WHERE staff_file_no IS NOT NULL;
+                END IF;
+            END IF;
+        END $$;
+        """,
         "ALTER TABLE offices ADD COLUMN IF NOT EXISTS is_disqualified BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE offices ADD COLUMN IF NOT EXISTS max_votes INTEGER DEFAULT 1 NOT NULL;",
         "ALTER TABLE votes ADD COLUMN IF NOT EXISTS receipt_hash VARCHAR(64);",

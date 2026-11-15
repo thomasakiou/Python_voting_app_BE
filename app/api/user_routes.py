@@ -804,12 +804,15 @@ def update_user_details(
     # Update Username / MCS Number
     if payload.username is not None and payload.username.strip():
         new_username = payload.username.strip()
-        if new_username != user.username:
-            conflict = db.query(User).filter(User.username == new_username, User.id != user_id).first()
+        if new_username.lower() != user.username.lower():
+            conflict = db.query(User).filter(
+                func.lower(User.username) == func.lower(new_username),
+                User.id != user_id
+            ).first()
             if conflict:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail=f"MCS Number / Username '{new_username}' is already in use by another user",
+                    detail=f"MCS Number (Username) '{new_username}' is already in use by user '{conflict.username}' ({conflict.full_name})",
                 )
             user.username = new_username
             # Also update Vote records referencing user_name for audit consistency
@@ -836,8 +839,22 @@ def update_user_details(
         role_val = payload.role.value if hasattr(payload.role, 'value') else payload.role
         user.role = role_val
 
+    # Update Staff File Number with duplicate constraint check
     if payload.staff_file_no is not None:
-        user.staff_file_no = payload.staff_file_no.strip() if payload.staff_file_no and payload.staff_file_no.strip() else None
+        clean_file_no = payload.staff_file_no.strip() if payload.staff_file_no and payload.staff_file_no.strip() else None
+        if clean_file_no:
+            current_file_no = (user.staff_file_no or '').strip()
+            if clean_file_no.lower() != current_file_no.lower():
+                conflict_file = db.query(User).filter(
+                    func.lower(User.staff_file_no) == func.lower(clean_file_no),
+                    User.id != user_id
+                ).first()
+                if conflict_file:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"Staff File Number '{clean_file_no}' is already assigned to user '{conflict_file.username}' ({conflict_file.full_name})",
+                    )
+        user.staff_file_no = clean_file_no
 
     if payload.staff_station is not None:
         user.staff_station = payload.staff_station.strip() if payload.staff_station and payload.staff_station.strip() else None

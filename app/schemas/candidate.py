@@ -7,6 +7,7 @@ from ..schemas.office import OfficeOut
 class CandidateBase(BaseModel):
     candidate_code: str
     name: str
+    office_code: Optional[str] = None
     image_url: Optional[str] = None
     is_disqualified: Optional[bool] = False
     is_hidden: Optional[bool] = False
@@ -30,6 +31,7 @@ class CandidateCreate(CandidateBase):
 
 class CandidateResponse(CandidateBase):
     id: int
+    office_code: Optional[str] = None
     created_at: datetime
     office: Optional[OfficeOut] = None
     vote_count: Optional[int] = 0

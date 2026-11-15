@@ -42,10 +42,17 @@ def apply_user_filters(
     status: Optional[str] = None,
     accreditation: Optional[str] = None,
     staff_status: Optional[str] = None,
+    current_user_role: Optional[str] = None,
 ):
+    if current_user_role == "admin":
+        query = query.filter(User.role != "super-admin")
+
     if role:
         if role != "all":
-            query = query.filter(User.role == role)
+            if current_user_role == "admin" and role == "super-admin":
+                query = query.filter(User.id == -1)
+            else:
+                query = query.filter(User.role == role)
     else:
         query = query.filter(User.role == "voter")
 
@@ -166,7 +173,15 @@ def export_voters_csv(
     Download a CSV file containing voters matching the selected filters.
     """
     query = db.query(User)
-    query = apply_user_filters(query, search=search, role=role, status=status, accreditation=accreditation, staff_status=staff_status)
+    query = apply_user_filters(
+        query,
+        search=search,
+        role=role,
+        status=status,
+        accreditation=accreditation,
+        staff_status=staff_status,
+        current_user_role=current_user.role,
+    )
     voters = query.order_by(User.username.asc()).all()
 
     output = io.StringIO()
@@ -244,7 +259,15 @@ def export_voters_pdf(
     import html
 
     query = db.query(User)
-    query = apply_user_filters(query, search=search, role=role, status=status, accreditation=accreditation, staff_status=staff_status)
+    query = apply_user_filters(
+        query,
+        search=search,
+        role=role,
+        status=status,
+        accreditation=accreditation,
+        staff_status=staff_status,
+        current_user_role=current_user.role,
+    )
     voters = query.order_by(User.username.asc()).all()
 
     buffer = io.BytesIO()
@@ -363,6 +386,11 @@ def create_any_user(
     current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
 ):
     role_val = str(user.role.value if hasattr(user.role, 'value') else user.role or "voter")
+    if current_user.role == "admin" and role_val == "super-admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admins cannot create Super Admin accounts.",
+        )
     default_pw = "admin123" if role_val in ("admin", "super-admin") else ("agent123" if role_val == "agent" else "voter123")
     command = CreateUserCommand(
         username=user.username,
@@ -381,7 +409,7 @@ def create_any_user(
     handler = CreateUserHandler(db)
     created = handler.handle(command)
     cache.delete("voter_analysis")
-    cache.delete("all_users_list")
+    cache.invalidate_prefix("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -458,7 +486,7 @@ def create_agent_user(
     handler = CreateUserHandler(db)
     created = handler.handle(command)
     cache.delete("voter_analysis")
-    cache.delete("all_users_list")
+    cache.invalidate_prefix("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -497,7 +525,7 @@ def create_voter_user(
     handler = CreateUserHandler(db)
     created = handler.handle(command)
     cache.delete("voter_analysis")
-    cache.delete("all_users_list")
+    cache.invalidate_prefix("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -600,7 +628,7 @@ def upload_voters_csv(
     result = handler.handle(command)
 
     cache.delete("voter_analysis")
-    cache.delete("all_users_list")
+    cache.invalidate_prefix("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -696,7 +724,7 @@ def bulk_disqualify_voters(
     db.commit()
 
     cache.delete("voter_analysis")
-    cache.delete("all_users_list")
+    cache.invalidate_prefix("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -723,14 +751,17 @@ def get_all_users(
     db: Session = Depends(get_db),
     current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
 ):
-    cached = cache.get("all_users_list")
+    cache_key = f"all_users_list_{current_user.role}"
+    cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
     query = ListUsersQuery()
     handler = ListUsersHandler(db)
     users = handler.handle(query)
-    cache.set("all_users_list", users, ttl_seconds=15)
+    if current_user.role == "admin":
+        users = [u for u in users if u.role != "super-admin"]
+    cache.set(cache_key, users, ttl_seconds=15)
     return users
 
 
@@ -755,31 +786,46 @@ def get_user(
 
     query = GetUserByUsernameQuery(username=name or username)
     handler = GetUserByUsernameHandler(db)
-    return handler.handle(query)
+    user = handler.handle(query)
+    if current_user.role == "admin" and user.role == "super-admin":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    return user
 
 
 # ============================================================
-# BULK DELETE USERS (SUPER-ADMIN ONLY)
+# BULK DELETE USERS
 # ============================================================
 @router.post("/bulk-delete")
 def bulk_delete_users(
     payload: schemas.BulkDeleteUsersRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(oauth2.role_required(["super-admin"])),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
 ):
     """
     Bulk deletes multiple users by their IDs.
-    Protects the current user from deleting their own account.
+    Protects the current user from deleting their own account, and prevents admins from deleting Super Admin accounts.
     """
     if not payload.user_ids:
         return {"deleted_count": 0, "message": "No users provided"}
 
     # Exclude current user id
     safe_ids = [uid for uid in payload.user_ids if uid != current_user.id]
+    if current_user.role == "admin":
+        super_admin_ids = {
+            row[0] for row in db.query(models.User.id).filter(
+                models.User.id.in_(safe_ids),
+                models.User.role == "super-admin"
+            ).all()
+        }
+        safe_ids = [uid for uid in safe_ids if uid not in super_admin_ids]
+
     if not safe_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete your own account.",
+            detail="Cannot delete your own account or protected accounts.",
         )
 
     users_to_delete = db.query(models.User).filter(models.User.id.in_(safe_ids)).all()
@@ -790,7 +836,7 @@ def bulk_delete_users(
 
     db.commit()
     cache.delete("voter_analysis")
-    cache.delete("all_users_list")
+    cache.invalidate_prefix("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -810,13 +856,16 @@ def bulk_delete_users(
 def delete_user(
     id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(oauth2.role_required(["super-admin"])),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
 ):
+    target = db.query(models.User).filter(models.User.id == id).first()
+    if not target or (current_user.role == "admin" and target.role == "super-admin"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     command = DeleteUserCommand(user_id=id)
     handler = DeleteUserHandler(db)
     result = handler.handle(command)
     cache.delete("voter_analysis")
-    cache.delete("all_users_list")
+    cache.invalidate_prefix("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -841,10 +890,19 @@ def update_user_details(
     current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
 ):
     user = db.query(User).filter(User.id == user_id).first()
-    if not user:
+    if not user or (current_user.role == "admin" and user.role == "super-admin"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     old_username = user.username
+
+    # Prevent Admin from promoting user to Super Admin
+    if current_user.role == "admin" and payload.role:
+        role_val = payload.role.value if hasattr(payload.role, 'value') else payload.role
+        if role_val == "super-admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admins cannot assign the Super Admin role",
+            )
 
     # Update Username / MCS Number
     if payload.username is not None and payload.username.strip():
@@ -922,7 +980,7 @@ def update_user_details(
     db.commit()
     db.refresh(user)
     cache.delete("voter_analysis")
-    cache.delete("all_users_list")
+    cache.invalidate_prefix("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -950,7 +1008,7 @@ def reset_admin_login(
     Super-admin only.
     """
     user = db.query(User).filter(User.id == user_id).first()
-    if not user:
+    if not user or (current_user.role == "admin" and user.role == "super-admin"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     if user.role != "admin":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only admin accounts have single-use login restrictions")
@@ -960,7 +1018,7 @@ def reset_admin_login(
     user.last_active_at = None
     db.commit()
     db.refresh(user)
-    cache.delete("all_users_list")
+    cache.invalidate_prefix("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -988,7 +1046,7 @@ def force_logout_admin(
     Super-admin only.
     """
     user = db.query(User).filter(User.id == user_id).first()
-    if not user:
+    if not user or (current_user.role == "admin" and user.role == "super-admin"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     if user.role != "admin":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only admin accounts can be remotely logged out")
@@ -999,7 +1057,7 @@ def force_logout_admin(
     user.admin_login_count = 0
     db.commit()
     db.refresh(user)
-    cache.delete("all_users_list")
+    cache.invalidate_prefix("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -1023,14 +1081,14 @@ def toggle_staff_active_status(
     current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
 ):
     user = db.query(User).filter(User.id == user_id).first()
-    if not user:
+    if not user or (current_user.role == "admin" and user.role == "super-admin"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     user.staff_active = staff_active
     db.commit()
     db.refresh(user)
     cache.delete("voter_analysis")
-    cache.delete("all_users_list")
+    cache.invalidate_prefix("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -1057,6 +1115,10 @@ def toggle_active_status(
     Disable or enable an individual voter. Any voter disabled by admin
     becomes a non-eligible voter and cannot log in to vote or accredit.
     """
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target or (current_user.role == "admin" and target.role == "super-admin"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
     command = ToggleUserStatusCommand(
         user_id=user_id,
         is_active=is_active,
@@ -1065,7 +1127,7 @@ def toggle_active_status(
     updated_user = handler.handle(command)
 
     cache.delete("voter_analysis")
-    cache.delete("all_users_list")
+    cache.invalidate_prefix("all_users_list")
 
     action_label = "ENABLE_USER" if is_active else "DISABLE_USER"
     record_audit_log(
@@ -1093,7 +1155,7 @@ def disable_all_voters(
     handler = DisableAllVotersHandler(db)
     result = handler.handle(command)
     cache.delete("voter_analysis")
-    cache.delete("all_users_list")
+    cache.invalidate_prefix("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -1117,7 +1179,7 @@ def enable_all_voters(
     handler = EnableAllVotersHandler(db)
     result = handler.handle(command)
     cache.delete("voter_analysis")
-    cache.delete("all_users_list")
+    cache.invalidate_prefix("all_users_list")
     record_audit_log(
         db=db,
         admin_username=current_user.username,
@@ -1187,7 +1249,7 @@ def reverse_voter_accreditation(
     db.refresh(user)
 
     cache.delete("voter_analysis")
-    cache.delete("all_users_list")
+    cache.invalidate_prefix("all_users_list")
 
     record_audit_log(
         db=db,

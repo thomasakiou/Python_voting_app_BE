@@ -53,6 +53,23 @@ def auto_upgrade_schema():
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS conraiss VARCHAR(50);",
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS station VARCHAR(150);",
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS file_no VARCHAR(100);",
+        # Auto-link candidate staff information with users (voters) table by matching candidate_code to username
+        """
+        UPDATE candidates c
+        SET 
+            mcs_number = COALESCE(NULLIF(c.mcs_number, ''), u.username, c.candidate_code),
+            conraiss = COALESCE(NULLIF(c.conraiss, ''), u.staff_conraiss),
+            station = COALESCE(NULLIF(c.station, ''), u.staff_station),
+            file_no = COALESCE(NULLIF(c.file_no, ''), u.staff_file_no)
+        FROM users u
+        WHERE LOWER(TRIM(c.candidate_code)) = LOWER(TRIM(u.username))
+           OR LOWER(TRIM(c.name)) = LOWER(TRIM(u.full_name));
+        """,
+        """
+        UPDATE candidates
+        SET mcs_number = candidate_code
+        WHERE mcs_number IS NULL OR mcs_number = '';
+        """,
         "ALTER TABLE offices ADD COLUMN IF NOT EXISTS is_disqualified BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE offices ADD COLUMN IF NOT EXISTS max_votes INTEGER DEFAULT 1 NOT NULL;",
         "ALTER TABLE votes ADD COLUMN IF NOT EXISTS receipt_hash VARCHAR(64);",

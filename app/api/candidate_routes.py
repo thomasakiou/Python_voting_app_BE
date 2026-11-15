@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from typing import List
 
 from ..core import database, oauth2
@@ -25,25 +25,58 @@ router = APIRouter(prefix=f"{settings.api_prefix}/candidates", tags=["Candidates
 
 
 def enrich_candidate(cand: Candidate, db: Session) -> Candidate:
-    """Enriches candidate with staff information from User table if missing."""
+    """
+    Enriches candidate with staff information from User (voters) table.
+    Matches candidate_code to User.username, extracting MCS number, file number, CONRAISS, and station.
+    """
     if not cand:
         return cand
-    if not cand.mcs_number or not cand.conraiss or not cand.station or not cand.file_no:
-        user = None
-        if cand.mcs_number:
-            user = db.query(User).filter(User.username == cand.mcs_number).first()
-        if not user and cand.name:
-            user = db.query(User).filter(func.lower(User.full_name) == func.lower(cand.name.strip())).first()
 
-        if user:
-            if not cand.mcs_number and user.username:
-                cand.mcs_number = user.username
-            if not cand.conraiss and user.staff_conraiss:
-                cand.conraiss = user.staff_conraiss
-            if not cand.station and user.staff_station:
-                cand.station = user.staff_station
-            if not cand.file_no and user.staff_file_no:
-                cand.file_no = user.staff_file_no
+    user = None
+    # 1. Primary match: Match User.username to candidate_code (MCS Number is equal to candidate_code)
+    if cand.candidate_code:
+        code_clean = cand.candidate_code.strip()
+        user = db.query(User).filter(
+            or_(
+                User.username == code_clean,
+                func.lower(User.username) == func.lower(code_clean)
+            )
+        ).first()
+
+    # 2. Secondary match: if not found, match by cand.mcs_number
+    if not user and cand.mcs_number:
+        mcs_clean = cand.mcs_number.strip()
+        user = db.query(User).filter(
+            or_(
+                User.username == mcs_clean,
+                func.lower(User.username) == func.lower(mcs_clean)
+            )
+        ).first()
+
+    # 3. Tertiary match: if not found, match by full name
+    if not user and cand.name:
+        name_clean = cand.name.strip()
+        user = db.query(User).filter(
+            or_(
+                func.lower(User.full_name) == func.lower(name_clean),
+                User.full_name.ilike(f"%{name_clean}%"),
+            )
+        ).first()
+
+    if user:
+        if not cand.mcs_number or cand.mcs_number.strip() == '':
+            cand.mcs_number = user.username or cand.candidate_code
+        if not cand.conraiss and user.staff_conraiss:
+            cand.conraiss = user.staff_conraiss
+        if not cand.station and user.staff_station:
+            cand.station = user.staff_station
+        if not cand.file_no and user.staff_file_no:
+            cand.file_no = user.staff_file_no
+    else:
+        # Fallback: candidate_code is MCS Number
+        if not cand.mcs_number or cand.mcs_number.strip() == '':
+            cand.mcs_number = cand.candidate_code
+
     return cand
 
 
@@ -61,18 +94,34 @@ def create_candidate(
     station = candidate.station
     file_no = candidate.file_no
 
-    # Auto-resolve from User table if missing
-    if not mcs_number or not conraiss or not station or not file_no:
-        user = None
-        if mcs_number:
-            user = db.query(User).filter(User.username == mcs_number).first()
-        if not user and candidate.name:
-            user = db.query(User).filter(func.lower(User.full_name) == func.lower(candidate.name.strip())).first()
-        if user:
-            mcs_number = mcs_number or user.username
-            conraiss = conraiss or user.staff_conraiss
-            station = station or user.staff_station
-            file_no = file_no or user.staff_file_no
+    # Auto-resolve from User table by matching candidate_code to User.username
+    user = None
+    code_clean = candidate.candidate_code.strip() if candidate.candidate_code else ""
+    if code_clean:
+        user = db.query(User).filter(
+            or_(
+                User.username == code_clean,
+                func.lower(User.username) == func.lower(code_clean)
+            )
+        ).first()
+    if not user and mcs_number:
+        user = db.query(User).filter(
+            or_(
+                User.username == mcs_number.strip(),
+                func.lower(User.username) == func.lower(mcs_number.strip())
+            )
+        ).first()
+    if not user and candidate.name:
+        user = db.query(User).filter(func.lower(User.full_name) == func.lower(candidate.name.strip())).first()
+
+    if user:
+        mcs_number = user.username or mcs_number or candidate.candidate_code
+        conraiss = conraiss or user.staff_conraiss
+        station = station or user.staff_station
+        file_no = file_no or user.staff_file_no
+    else:
+        if not mcs_number:
+            mcs_number = candidate.candidate_code
 
     command = CreateCandidateCommand(
         candidate_code=candidate.candidate_code,
@@ -224,17 +273,34 @@ def update_candidate(
     station = candidate.station
     file_no = candidate.file_no
 
-    if not mcs_number or not conraiss or not station or not file_no:
-        user = None
-        if mcs_number:
-            user = db.query(User).filter(User.username == mcs_number).first()
-        if not user and candidate.name:
-            user = db.query(User).filter(func.lower(User.full_name) == func.lower(candidate.name.strip())).first()
-        if user:
-            mcs_number = mcs_number or user.username
-            conraiss = conraiss or user.staff_conraiss
-            station = station or user.staff_station
-            file_no = file_no or user.staff_file_no
+    # Auto-resolve from User table by matching candidate_code to User.username
+    user = None
+    code_clean = candidate.candidate_code.strip() if candidate.candidate_code else ""
+    if code_clean:
+        user = db.query(User).filter(
+            or_(
+                User.username == code_clean,
+                func.lower(User.username) == func.lower(code_clean)
+            )
+        ).first()
+    if not user and mcs_number:
+        user = db.query(User).filter(
+            or_(
+                User.username == mcs_number.strip(),
+                func.lower(User.username) == func.lower(mcs_number.strip())
+            )
+        ).first()
+    if not user and candidate.name:
+        user = db.query(User).filter(func.lower(User.full_name) == func.lower(candidate.name.strip())).first()
+
+    if user:
+        mcs_number = mcs_number or user.username or candidate.candidate_code
+        conraiss = conraiss or user.staff_conraiss
+        station = station or user.staff_station
+        file_no = file_no or user.staff_file_no
+    else:
+        if not mcs_number:
+            mcs_number = candidate.candidate_code
 
     command = UpdateCandidateCommand(
         candidate_id=id,

@@ -7,6 +7,7 @@ from sqlalchemy import func, or_
 from typing import List
 
 from ..core import database, oauth2
+from ..core.utils import delete_candidate_image_file
 from ..schemas import candidate as schemas
 from ..core.config import settings
 from ..core.database import get_db
@@ -345,6 +346,8 @@ def bulk_delete_candidates(
     candidates = db.query(Candidate).filter(Candidate.id.in_(payload.candidate_ids)).all()
     deleted_count = len(candidates)
     for c in candidates:
+        if c.image_url:
+            delete_candidate_image_file(c.image_url)
         db.delete(c)
 
     db.commit()
@@ -549,8 +552,11 @@ async def upload_candidate_image_by_id(
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
 
+    old_image_url = candidate.image_url
     res = await upload_candidate_image(file=file, current_user=current_user)
     candidate.image_url = res["image_url"]
+    if old_image_url and old_image_url != candidate.image_url:
+        delete_candidate_image_file(old_image_url)
     db.commit()
     db.refresh(candidate)
     cache.clear()

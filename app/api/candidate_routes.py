@@ -162,6 +162,8 @@ def get_all_candidates(
     query = ListCandidatesQuery()
     handler = ListCandidatesHandler(db)
     candidates = handler.handle(query)
+    if current_user.role not in ["super-admin", "admin"]:
+        candidates = [c for c in candidates if not getattr(c, "is_hidden", False)]
     for c in candidates:
         enrich_candidate(c, db)
     return candidates

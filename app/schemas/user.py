@@ -55,6 +55,7 @@ class UserResponse(UserBase):
     staff_conraiss: Optional[str] = None
     staff_active: Optional[bool] = True
     admin_login_count: Optional[int] = 0
+    current_session_id: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -69,6 +70,7 @@ class UserOut(UserBase):
     accredited_at: Optional[datetime] = None
     accredited_device_id: Optional[str] = None
     device_info: Optional[str] = None
+    current_session_id: Optional[str] = None
     email: Optional[str] = None
     staff_file_no: Optional[str] = None
     staff_station: Optional[str] = None

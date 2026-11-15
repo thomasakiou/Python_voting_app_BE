@@ -64,13 +64,14 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if not user:
         raise credentials_exception
 
-    # Enforce single session for regular admin accounts
+    # Enforce active single session for regular admin accounts
+    # If the session was terminated by super-admin or another login, kick out immediately
     # Super-admin accounts are exempt so super-admin can log in at anytime across devices/tabs
-    if user.role == "admin" and user.current_session_id:
-        if token_data.session_id != user.current_session_id:
+    if user.role == "admin":
+        if not user.current_session_id or token_data.session_id != user.current_session_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Admin session expired: A new login was initiated on another device.",
+                detail="Admin session expired or terminated by super administrator.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 

@@ -929,6 +929,44 @@ def reset_admin_login(
 
 
 # ============================================================
+# FORCE LOGOUT ADMIN (Super Admin Only)
+# ============================================================
+@router.post("/{user_id}/logout-admin", response_model=schemas.UserOut)
+@router.post("/{user_id}/logout-admin/", response_model=schemas.UserOut)
+def force_logout_admin(
+    user_id: int,
+    db: Session = Depends(database.get_db),
+    current_user=Depends(oauth2.role_required(["super-admin"])),
+):
+    """
+    Terminates the active session of an administrator account immediately.
+    Super-admin only.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only admin accounts can be remotely logged out")
+
+    user.current_session_id = None
+    user.device_info = None
+    user.last_active_at = None
+    db.commit()
+    db.refresh(user)
+    cache.delete("all_users_list")
+    record_audit_log(
+        db=db,
+        admin_username=current_user.username,
+        action="FORCE_LOGOUT_ADMIN",
+        target_type="ADMIN",
+        target_id=str(user.username),
+        details=f"Super admin terminated active session for admin {user.username}",
+        admin_id=current_user.id,
+    )
+    return user
+
+
+# ============================================================
 # TOGGLE STAFF ACTIVE STATUS
 # ============================================================
 @router.patch("/{user_id}/staff-status", response_model=schemas.UserOut)

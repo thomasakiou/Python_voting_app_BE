@@ -25,6 +25,7 @@ def logout(
                     user.current_session_id = None
                     user.device_info = None
                     user.last_active_at = None
+                    user.admin_login_count = 0
                     db.commit()
         except Exception:
             pass

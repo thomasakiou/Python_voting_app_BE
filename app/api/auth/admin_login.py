@@ -108,59 +108,44 @@ def admin_login(
             detail="Your account is deactivated. Please contact the super-administrator.",
         )
 
-    # ── 5. SINGLE-LOGIN RULE FOR ADMINS CREATED BY SUPER ADMIN
-    # Super-admin accounts can log in at anytime without limit.
-    # Regular admin accounts created by super-admin can ONLY log in once.
-    if user.role == "admin":
-        if (user.admin_login_count or 0) >= 1:
+    now = datetime.now(timezone.utc)
+
+    # ── 5. SINGLE ACTIVE SESSION RULE FOR ADMIN ACCOUNTS
+    # When an admin account is currently logged in, that SAME account cannot be logged into again.
+    # When the admin logs out (or super-admin terminates session), the account is released to log in again.
+    # Super-admin is exempt and can log in at anytime.
+    if user.role == "admin" and user.current_session_id and not credentials.force:
+        timeout_seconds = getattr(settings, "admin_session_timeout_minutes", 15) * 60
+        is_active = True
+        if user.last_active_at is not None:
+            last_active = user.last_active_at
+            if last_active.tzinfo is None:
+                last_active = last_active.replace(tzinfo=timezone.utc)
+            if (now - last_active).total_seconds() > timeout_seconds:
+                # Inactive session has timed out -> release the account automatically
+                user.current_session_id = None
+                user.device_info = None
+                user.last_active_at = None
+                user.admin_login_count = 0
+                db.commit()
+                is_active = False
+
+        if is_active:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    "This admin account has already been used to log in. "
-                    "Single-use admin accounts can only log in once. "
-                    "Please contact the super administrator to create a new admin account."
+                    "This admin account is currently logged in on another session. "
+                    "You cannot log in until that session logs out or is released by the super administrator."
                 ),
             )
 
-    now = datetime.now(timezone.utc)
-
-    # ── 6. Single session concurrency check (for admin accounts only, super admin is never blocked)
-    if user.role == "admin" and user.current_session_id and not credentials.force:
-        is_same_device = bool(
-            credentials.device_id
-            and user.device_info
-            and credentials.device_id.strip() == user.device_info.strip()
-        )
-        if not is_same_device:
-            timeout_seconds = getattr(settings, "admin_session_timeout_minutes", 15) * 60
-            is_active = True
-            if user.last_active_at is not None:
-                last_active = user.last_active_at
-                if last_active.tzinfo is None:
-                    last_active = last_active.replace(tzinfo=timezone.utc)
-                if (now - last_active).total_seconds() > timeout_seconds:
-                    is_active = False
-
-            if is_active:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=(
-                        "Another administrator session is currently logged in. "
-                        "Only one admin session is allowed at a time. "
-                        "You cannot log in until that session logs out."
-                    ),
-                )
-
-    # ── 7. Issue new session ID, increment login count for single-use admin, and bind device
+    # ── 6. Issue new session ID and bind active session
     session_id = str(uuid.uuid4())
     user.current_session_id = session_id
     if credentials.device_id:
         user.device_info = credentials.device_id.strip()
     user.last_active_at = now
-
-    # Admin account single-use increment
-    if user.role == "admin":
-        user.admin_login_count = (user.admin_login_count or 0) + 1
+    user.admin_login_count = 1
 
     db.commit()
 

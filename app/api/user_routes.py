@@ -6,7 +6,7 @@ import io
 import csv
 from datetime import datetime
 
-from ..core import database, oauth2
+from ..core import database, oauth2, utils
 from ..schemas import user as schemas
 from ..core.config import settings
 from ..core.database import get_db
@@ -353,6 +353,48 @@ def export_voters_pdf(
 
 
 # ============================================================
+# CREATE USER (GENERIC - ALL ROLES)
+# ============================================================
+@router.post("", response_model=schemas.UserOut)
+@router.post("/", response_model=schemas.UserOut)
+def create_any_user(
+    user: schemas.UserCreate,
+    db: Session = Depends(database.get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
+):
+    role_val = str(user.role.value if hasattr(user.role, 'value') else user.role or "voter")
+    default_pw = "admin123" if role_val in ("admin", "super-admin") else ("agent123" if role_val == "agent" else "voter123")
+    command = CreateUserCommand(
+        username=user.username,
+        password=user.password or default_pw,
+        full_name=user.full_name or user.username,
+        phone=user.phone,
+        email=user.email,
+        role=role_val,
+        must_change_password=(role_val == "voter"),
+        staff_file_no=user.staff_file_no,
+        staff_station=user.staff_station,
+        staff_rank=user.staff_rank,
+        staff_conraiss=user.staff_conraiss,
+        staff_active=user.staff_active if user.staff_active is not None else True,
+    )
+    handler = CreateUserHandler(db)
+    created = handler.handle(command)
+    cache.delete("voter_analysis")
+    cache.delete("all_users_list")
+    record_audit_log(
+        db=db,
+        admin_username=current_user.username,
+        action=f"CREATE_{role_val.upper()}",
+        target_type="USER",
+        target_id=str(created.username),
+        details=f"Created {role_val} user {created.username} ({created.full_name})",
+        admin_id=current_user.id,
+    )
+    return created
+
+
+# ============================================================
 # CREATE USER (ADMIN)
 # ============================================================
 @router.post("/admin", response_model=schemas.UserOut)
@@ -369,6 +411,11 @@ def create_admin_user(
         email=user.email,
         role="admin",
         must_change_password=False,
+        staff_file_no=user.staff_file_no,
+        staff_station=user.staff_station,
+        staff_rank=user.staff_rank,
+        staff_conraiss=user.staff_conraiss,
+        staff_active=user.staff_active if user.staff_active is not None else True,
     )
     handler = CreateUserHandler(db)
     created = handler.handle(command)
@@ -752,24 +799,60 @@ def update_user_details(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    if payload.full_name is not None:
+    old_username = user.username
+
+    # Update Username / MCS Number
+    if payload.username is not None and payload.username.strip():
+        new_username = payload.username.strip()
+        if new_username != user.username:
+            conflict = db.query(User).filter(User.username == new_username, User.id != user_id).first()
+            if conflict:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"MCS Number / Username '{new_username}' is already in use by another user",
+                )
+            user.username = new_username
+            # Also update Vote records referencing user_name for audit consistency
+            db.query(Vote).filter(Vote.user_id == user.id).update({"user_name": new_username})
+
+    if payload.full_name is not None and payload.full_name.strip():
         user.full_name = payload.full_name.strip()
+
     if payload.phone is not None:
-        user.phone = payload.phone.strip() if payload.phone else None
+        user.phone = payload.phone.strip() if payload.phone and payload.phone.strip() else None
+
     if payload.email is not None:
-        user.email = payload.email.strip().lower() if payload.email else None
+        clean_email = payload.email.strip().lower() if payload.email and payload.email.strip() else None
+        if clean_email and clean_email != (user.email or '').lower():
+            conflict = db.query(User).filter(User.email == clean_email, User.id != user_id).first()
+            if conflict:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Email '{clean_email}' is already in use by another user",
+                )
+        user.email = clean_email
+
     if payload.role is not None:
-        user.role = payload.role
+        role_val = payload.role.value if hasattr(payload.role, 'value') else payload.role
+        user.role = role_val
+
     if payload.staff_file_no is not None:
-        user.staff_file_no = payload.staff_file_no.strip() if payload.staff_file_no else None
+        user.staff_file_no = payload.staff_file_no.strip() if payload.staff_file_no and payload.staff_file_no.strip() else None
+
     if payload.staff_station is not None:
-        user.staff_station = payload.staff_station.strip() if payload.staff_station else None
+        user.staff_station = payload.staff_station.strip() if payload.staff_station and payload.staff_station.strip() else None
+
     if payload.staff_rank is not None:
-        user.staff_rank = payload.staff_rank.strip() if payload.staff_rank else None
+        user.staff_rank = payload.staff_rank.strip() if payload.staff_rank and payload.staff_rank.strip() else None
+
     if payload.staff_conraiss is not None:
-        user.staff_conraiss = payload.staff_conraiss.strip() if payload.staff_conraiss else None
+        user.staff_conraiss = payload.staff_conraiss.strip() if payload.staff_conraiss and payload.staff_conraiss.strip() else None
+
     if payload.staff_active is not None:
         user.staff_active = payload.staff_active
+
+    if payload.password is not None and payload.password.strip():
+        user.password = utils.hash_password(payload.password.strip())
 
     db.commit()
     db.refresh(user)
@@ -781,7 +864,7 @@ def update_user_details(
         action="UPDATE_USER",
         target_type="USER",
         target_id=str(user.username),
-        details=f"Admin updated user {user.username} ({user.full_name})",
+        details=f"Admin updated user {user.username} (formerly {old_username})",
         admin_id=current_user.id,
     )
     return user

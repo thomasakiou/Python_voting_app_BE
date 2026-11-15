@@ -80,9 +80,11 @@ class UserOut(UserBase):
 
 
 class UserUpdate(BaseModel):
+    username: Optional[str] = None
     full_name: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
+    password: Optional[str] = None
     role: Optional[UserRole] = None
     staff_file_no: Optional[str] = None
     staff_station: Optional[str] = None

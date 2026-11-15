@@ -19,5 +19,18 @@ class Candidate(Base):
 
     office_code = Column(String, ForeignKey("offices.office_code", ondelete="CASCADE"))
 
+    # Staff Information
+    mcs_number = Column(String(50), nullable=True)
+    conraiss = Column(String(50), nullable=True)
+    station = Column(String(150), nullable=True)
+    file_no = Column(String(100), nullable=True)
+
     office = relationship("Office", back_populates="candidates")
     votes = relationship("Vote", back_populates="candidate")
+
+    @property
+    def vote_count(self) -> int:
+        try:
+            return len(self.votes) if self.votes is not None else 0
+        except Exception:
+            return 0

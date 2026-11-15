@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List
 
 from ..core import database, oauth2
@@ -12,6 +13,7 @@ from ..core.database import get_db
 from ..core.audit import record_audit_log
 from ..core.cache import cache
 from ..domain.candidate import Candidate
+from ..domain.user import User
 from ..application.commands.candidate.create_candidate import CreateCandidateCommand, CreateCandidateHandler
 from ..application.queries.candidate.get_all_candidates import ListCandidatesHandler, ListCandidatesQuery
 from ..application.queries.candidate.get_candidate_by_code import GetCandidateByCodeQuery, GetCandidateByCodeHandler
@@ -20,6 +22,29 @@ from ..application.commands.candidate.delete_candidate import DeleteCandidateCom
 from ..application.commands.candidate.update_candidate import UpdateCandidateCommand, UpdateCandidateHandler
 
 router = APIRouter(prefix=f"{settings.api_prefix}/candidates", tags=["Candidates"])
+
+
+def enrich_candidate(cand: Candidate, db: Session) -> Candidate:
+    """Enriches candidate with staff information from User table if missing."""
+    if not cand:
+        return cand
+    if not cand.mcs_number or not cand.conraiss or not cand.station or not cand.file_no:
+        user = None
+        if cand.mcs_number:
+            user = db.query(User).filter(User.username == cand.mcs_number).first()
+        if not user and cand.name:
+            user = db.query(User).filter(func.lower(User.full_name) == func.lower(cand.name.strip())).first()
+
+        if user:
+            if not cand.mcs_number and user.username:
+                cand.mcs_number = user.username
+            if not cand.conraiss and user.staff_conraiss:
+                cand.conraiss = user.staff_conraiss
+            if not cand.station and user.staff_station:
+                cand.station = user.staff_station
+            if not cand.file_no and user.staff_file_no:
+                cand.file_no = user.staff_file_no
+    return cand
 
 
 # ==========================
@@ -31,6 +56,24 @@ def create_candidate(
     db: Session = Depends(database.get_db),
     current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
 ):
+    mcs_number = candidate.mcs_number
+    conraiss = candidate.conraiss
+    station = candidate.station
+    file_no = candidate.file_no
+
+    # Auto-resolve from User table if missing
+    if not mcs_number or not conraiss or not station or not file_no:
+        user = None
+        if mcs_number:
+            user = db.query(User).filter(User.username == mcs_number).first()
+        if not user and candidate.name:
+            user = db.query(User).filter(func.lower(User.full_name) == func.lower(candidate.name.strip())).first()
+        if user:
+            mcs_number = mcs_number or user.username
+            conraiss = conraiss or user.staff_conraiss
+            station = station or user.staff_station
+            file_no = file_no or user.staff_file_no
+
     command = CreateCandidateCommand(
         candidate_code=candidate.candidate_code,
         name=candidate.name,
@@ -38,9 +81,14 @@ def create_candidate(
         image_url=candidate.image_url,
         manifesto_title=candidate.manifesto_title,
         manifesto=candidate.manifesto,
+        mcs_number=mcs_number,
+        conraiss=conraiss,
+        station=station,
+        file_no=file_no,
     )
     handler = CreateCandidateHandler(db)
     result = handler.handle(command)
+    enrich_candidate(result, db)
     cache.clear()
     record_audit_log(
         db=db,
@@ -64,7 +112,10 @@ def get_all_candidates(
 ):
     query = ListCandidatesQuery()
     handler = ListCandidatesHandler(db)
-    return handler.handle(query)
+    candidates = handler.handle(query)
+    for c in candidates:
+        enrich_candidate(c, db)
+    return candidates
 
 
 # ======================================
@@ -78,7 +129,10 @@ def get_candidates_by_office_code(
 ):
     query = GetCandidateByOfficeCodeQuery(office_code=office_code)
     handler = GetCandidateByOfficeCodeHandler(db)
-    return handler.handle(query)
+    candidates = handler.handle(query)
+    for c in candidates:
+        enrich_candidate(c, db)
+    return candidates
 
 
 # ==========================
@@ -92,7 +146,10 @@ def get_candidate_by_code(
 ):
     query = GetCandidateByCodeQuery(candidate_code=candidate_code)
     handler = GetCandidateByCodeHandler(db)
-    return handler.handle(query)
+    cand = handler.handle(query)
+    if cand:
+        enrich_candidate(cand, db)
+    return cand
 
 
 # ======================================
@@ -162,6 +219,23 @@ def update_candidate(
     db: Session = Depends(get_db),
     current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
 ):
+    mcs_number = candidate.mcs_number
+    conraiss = candidate.conraiss
+    station = candidate.station
+    file_no = candidate.file_no
+
+    if not mcs_number or not conraiss or not station or not file_no:
+        user = None
+        if mcs_number:
+            user = db.query(User).filter(User.username == mcs_number).first()
+        if not user and candidate.name:
+            user = db.query(User).filter(func.lower(User.full_name) == func.lower(candidate.name.strip())).first()
+        if user:
+            mcs_number = mcs_number or user.username
+            conraiss = conraiss or user.staff_conraiss
+            station = station or user.staff_station
+            file_no = file_no or user.staff_file_no
+
     command = UpdateCandidateCommand(
         candidate_id=id,
         candidate_code=candidate.candidate_code,
@@ -170,9 +244,14 @@ def update_candidate(
         image_url=candidate.image_url,
         manifesto_title=candidate.manifesto_title,
         manifesto=candidate.manifesto,
+        mcs_number=mcs_number,
+        conraiss=conraiss,
+        station=station,
+        file_no=file_no,
     )
     handler = UpdateCandidateHandler(db)
     result = handler.handle(command)
+    enrich_candidate(result, db)
     cache.clear()
     record_audit_log(
         db=db,

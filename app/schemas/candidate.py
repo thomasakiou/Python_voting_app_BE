@@ -11,6 +11,10 @@ class CandidateBase(BaseModel):
     is_disqualified: Optional[bool] = False
     manifesto_title: Optional[str] = None
     manifesto: Optional[str] = None
+    mcs_number: Optional[str] = None
+    conraiss: Optional[str] = None
+    station: Optional[str] = None
+    file_no: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -27,6 +31,7 @@ class CandidateResponse(CandidateBase):
     id: int
     created_at: datetime
     office: Optional[OfficeOut] = None
+    vote_count: Optional[int] = 0
 
     class Config:
         from_attributes = True

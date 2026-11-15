@@ -55,8 +55,8 @@ class Settings(BaseSettings):
 settings = Settings()
 
 # Default Super Admin Data
-SUPER_ADMIN_USERNAME = "admin"
-SUPER_ADMIN_PASSWORD = "123456"
+SUPER_ADMIN_USERNAME = "super-admin"
+SUPER_ADMIN_PASSWORD = "Ebimobowei@1981"
 SUPER_ADMIN_FULLNAME = "Super Admin"
 
 # Default user password

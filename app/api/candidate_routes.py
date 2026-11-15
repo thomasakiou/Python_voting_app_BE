@@ -196,8 +196,9 @@ def get_candidate_by_code(
     query = GetCandidateByCodeQuery(candidate_code=candidate_code)
     handler = GetCandidateByCodeHandler(db)
     cand = handler.handle(query)
-    if cand:
-        enrich_candidate(cand, db)
+    if not cand or (getattr(cand, "is_hidden", False) and current_user.role not in ["super-admin", "admin"]):
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    enrich_candidate(cand, db)
     return cand
 
 
@@ -227,6 +228,38 @@ def toggle_candidate_disqualification(
         target_type="CANDIDATE",
         target_id=str(candidate.candidate_code),
         details=f"Admin set is_disqualified={payload.is_disqualified} for {candidate.name}",
+        admin_id=current_user.id,
+    )
+    cache.clear()
+    return candidate
+
+
+# ======================================
+# HIDE / UNHIDE CANDIDATE (ADMIN ONLY)
+# ======================================
+@router.patch("/{id}/hide", response_model=schemas.CandidateResponse)
+def toggle_candidate_visibility(
+    id: int,
+    payload: schemas.CandidateHideRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
+):
+    candidate = db.query(Candidate).filter(Candidate.id == id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    candidate.is_hidden = payload.is_hidden
+    db.commit()
+    db.refresh(candidate)
+
+    action_label = "HIDE_CANDIDATE" if payload.is_hidden else "UNHIDE_CANDIDATE"
+    record_audit_log(
+        db=db,
+        admin_username=current_user.username,
+        action=action_label,
+        target_type="CANDIDATE",
+        target_id=str(candidate.candidate_code),
+        details=f"Admin set is_hidden={payload.is_hidden} for {candidate.name}",
         admin_id=current_user.id,
     )
     cache.clear()

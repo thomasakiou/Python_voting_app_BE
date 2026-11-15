@@ -208,9 +208,7 @@ def get_live_votes_summary(
         "recent_votes": [
             {
                 "id": v.id,
-                "username": v.user.username if v.user else v.user_name,
-                "user_name": v.user.username if v.user else v.user_name,
-                "full_name": v.user.full_name if v.user else v.user_name,
+                "station": (v.user.staff_station if (v.user and v.user.staff_station) else "Headquarters"),
                 "office_name": v.office_name,
                 "candidate_name": v.candidate_name,
                 "receipt_hash": v.receipt_hash,

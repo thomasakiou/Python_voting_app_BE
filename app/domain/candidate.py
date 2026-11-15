@@ -24,6 +24,7 @@ class Candidate(Base):
     conraiss = Column(String(50), nullable=True)
     station = Column(String(150), nullable=True)
     file_no = Column(String(100), nullable=True)
+    is_hidden = Column(Boolean, default=False, nullable=False, server_default=text('false'))
 
     office = relationship("Office", back_populates="candidates")
     votes = relationship("Vote", back_populates="candidate")

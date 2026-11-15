@@ -9,6 +9,7 @@ class CandidateBase(BaseModel):
     name: str
     image_url: Optional[str] = None
     is_disqualified: Optional[bool] = False
+    is_hidden: Optional[bool] = False
     manifesto_title: Optional[str] = None
     manifesto: Optional[str] = None
     mcs_number: Optional[str] = None
@@ -39,3 +40,7 @@ class CandidateResponse(CandidateBase):
 
 class CandidateDisqualifyRequest(BaseModel):
     is_disqualified: bool
+
+
+class CandidateHideRequest(BaseModel):
+    is_hidden: bool

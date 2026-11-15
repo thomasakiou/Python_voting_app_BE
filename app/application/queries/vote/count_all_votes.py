@@ -32,7 +32,7 @@ class CountVotesHandler:
             )
             .join(Vote, Candidate.candidate_code == Vote.candidate_code, isouter=True)
             .join(Office, Candidate.office_code == Office.office_code)
-            .filter(Candidate.office_code == query.office_code)
+            .filter(Candidate.office_code == query.office_code, Candidate.is_hidden == False)
             .group_by(
                 Candidate.candidate_code,
                 Candidate.name,

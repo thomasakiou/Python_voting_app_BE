@@ -12,8 +12,11 @@ class GetCandidateByOfficeCodeHandler:
     def __init__(self, db):
         self.db = db
 
-    def handle(self, query: GetCandidateByOfficeCodeQuery):
-        candidates = self.db.query(models.Candidate).filter(models.Candidate.office_code == query.office_code).all()
+    def handle(self, query: GetCandidateByOfficeCodeQuery, include_hidden: bool = False):
+        q = self.db.query(models.Candidate).filter(models.Candidate.office_code == query.office_code)
+        if not include_hidden:
+            q = q.filter(models.Candidate.is_hidden == False)
+        candidates = q.all()
         if not candidates:
             raise HTTPException(status_code=404, detail=f"No candidates found for office_code {query.office_code}")
         return candidates

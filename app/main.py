@@ -46,6 +46,7 @@ def auto_upgrade_schema():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_conraiss VARCHAR(50);",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_active BOOLEAN DEFAULT TRUE;",
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS is_disqualified BOOLEAN DEFAULT FALSE;",
+        "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS image_url TEXT;",
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS manifesto_title VARCHAR(255);",
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS manifesto TEXT;",

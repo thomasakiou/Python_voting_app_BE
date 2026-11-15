@@ -133,6 +133,12 @@ class CastVoteHandler:
                     detail=f"Candidate '{candidate.name}' has been disqualified and cannot receive votes."
                 )
 
+            if getattr(candidate, "is_hidden", False):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Candidate '{candidate.name}' is unavailable for voting."
+                )
+
             if candidate.office_code != office.office_code:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,

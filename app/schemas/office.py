@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 
@@ -51,3 +51,7 @@ class OfficeOut(BaseModel):
 
 class OfficeDisqualifyRequest(BaseModel):
     is_disqualified: bool
+
+
+class BulkDeleteOfficesRequest(BaseModel):
+    office_ids: List[int]

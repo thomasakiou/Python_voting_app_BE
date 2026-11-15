@@ -266,6 +266,99 @@ def toggle_candidate_visibility(
     return candidate
 
 
+# ======================================
+# BULK CANDIDATE STATUS (DISQUALIFY/QUALIFY)
+# ======================================
+@router.post("/bulk-status")
+def bulk_candidate_status(
+    payload: schemas.BulkCandidateStatusRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
+):
+    if not payload.candidate_ids:
+        return {"updated_count": 0, "message": "No candidates provided"}
+
+    candidates = db.query(Candidate).filter(Candidate.id.in_(payload.candidate_ids)).all()
+    for c in candidates:
+        c.is_disqualified = payload.is_disqualified
+
+    db.commit()
+    cache.clear()
+    action = "BULK_DISQUALIFY" if payload.is_disqualified else "BULK_APPROVE"
+    record_audit_log(
+        db=db,
+        admin_username=current_user.username,
+        action=action,
+        target_type="CANDIDATE",
+        target_id=f"count:{len(candidates)}",
+        details=f"Bulk set is_disqualified={payload.is_disqualified} for {len(candidates)} candidates",
+        admin_id=current_user.id,
+    )
+    return {"updated_count": len(candidates), "message": f"Updated status for {len(candidates)} candidate(s)."}
+
+
+# ======================================
+# BULK CANDIDATE VISIBILITY (HIDE/UNHIDE)
+# ======================================
+@router.post("/bulk-visibility")
+def bulk_candidate_visibility(
+    payload: schemas.BulkCandidateVisibilityRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
+):
+    if not payload.candidate_ids:
+        return {"updated_count": 0, "message": "No candidates provided"}
+
+    candidates = db.query(Candidate).filter(Candidate.id.in_(payload.candidate_ids)).all()
+    for c in candidates:
+        c.is_hidden = payload.is_hidden
+
+    db.commit()
+    cache.clear()
+    action = "BULK_HIDE" if payload.is_hidden else "BULK_UNHIDE"
+    record_audit_log(
+        db=db,
+        admin_username=current_user.username,
+        action=action,
+        target_type="CANDIDATE",
+        target_id=f"count:{len(candidates)}",
+        details=f"Bulk set is_hidden={payload.is_hidden} for {len(candidates)} candidates",
+        admin_id=current_user.id,
+    )
+    return {"updated_count": len(candidates), "message": f"Updated visibility for {len(candidates)} candidate(s)."}
+
+
+# ======================================
+# BULK DELETE CANDIDATES
+# ======================================
+@router.post("/bulk-delete")
+def bulk_delete_candidates(
+    payload: schemas.BulkCandidateDeleteRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
+):
+    if not payload.candidate_ids:
+        return {"deleted_count": 0, "message": "No candidates provided"}
+
+    candidates = db.query(Candidate).filter(Candidate.id.in_(payload.candidate_ids)).all()
+    deleted_count = len(candidates)
+    for c in candidates:
+        db.delete(c)
+
+    db.commit()
+    cache.clear()
+    record_audit_log(
+        db=db,
+        admin_username=current_user.username,
+        action="BULK_DELETE_CANDIDATES",
+        target_type="CANDIDATE",
+        target_id=f"count:{deleted_count}",
+        details=f"Bulk deleted {deleted_count} candidates",
+        admin_id=current_user.id,
+    )
+    return {"deleted_count": deleted_count, "message": f"Deleted {deleted_count} candidate(s)."}
+
+
 # ==========================
 # DELETE CANDIDATE BY ID
 # ==========================

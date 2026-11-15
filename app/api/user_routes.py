@@ -759,6 +759,51 @@ def get_user(
 
 
 # ============================================================
+# BULK DELETE USERS (SUPER-ADMIN ONLY)
+# ============================================================
+@router.post("/bulk-delete")
+def bulk_delete_users(
+    payload: schemas.BulkDeleteUsersRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(oauth2.role_required(["super-admin"])),
+):
+    """
+    Bulk deletes multiple users by their IDs.
+    Protects the current user from deleting their own account.
+    """
+    if not payload.user_ids:
+        return {"deleted_count": 0, "message": "No users provided"}
+
+    # Exclude current user id
+    safe_ids = [uid for uid in payload.user_ids if uid != current_user.id]
+    if not safe_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete your own account.",
+        )
+
+    users_to_delete = db.query(models.User).filter(models.User.id.in_(safe_ids)).all()
+    deleted_count = 0
+    for u in users_to_delete:
+        db.delete(u)
+        deleted_count += 1
+
+    db.commit()
+    cache.delete("voter_analysis")
+    cache.delete("all_users_list")
+    record_audit_log(
+        db=db,
+        admin_username=current_user.username,
+        action="BULK_DELETE_USERS",
+        target_type="USER",
+        target_id=f"count:{deleted_count}",
+        details=f"Bulk deleted {deleted_count} users",
+        admin_id=current_user.id,
+    )
+    return {"deleted_count": deleted_count, "message": f"Successfully deleted {deleted_count} user(s)."}
+
+
+# ============================================================
 # DELETE USER BY ID
 # ============================================================
 @router.delete("/{id}")

@@ -111,3 +111,7 @@ class UserStatsOut(BaseModel):
     disabled_voters: int
     total_votes_cast: int
     turnout_percentage: float
+
+
+class BulkDeleteUsersRequest(BaseModel):
+    user_ids: List[int]

@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from ..schemas.office import OfficeOut
 
@@ -44,3 +44,17 @@ class CandidateDisqualifyRequest(BaseModel):
 
 class CandidateHideRequest(BaseModel):
     is_hidden: bool
+
+
+class BulkCandidateStatusRequest(BaseModel):
+    candidate_ids: List[int]
+    is_disqualified: bool
+
+
+class BulkCandidateVisibilityRequest(BaseModel):
+    candidate_ids: List[int]
+    is_hidden: bool
+
+
+class BulkCandidateDeleteRequest(BaseModel):
+    candidate_ids: List[int]

@@ -107,6 +107,37 @@ def toggle_office_disqualification(
 
 
 # ==========================
+# BULK DELETE OFFICES
+# ==========================
+@router.post("/bulk-delete")
+def bulk_delete_offices(
+    payload: schemas.BulkDeleteOfficesRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
+):
+    if not payload.office_ids:
+        return {"deleted_count": 0, "message": "No offices provided"}
+
+    offices = db.query(Office).filter(Office.id.in_(payload.office_ids)).all()
+    deleted_count = len(offices)
+    for off in offices:
+        db.delete(off)
+
+    db.commit()
+    cache.clear()
+    record_audit_log(
+        db=db,
+        admin_username=current_user.username,
+        action="BULK_DELETE_OFFICES",
+        target_type="OFFICE",
+        target_id=f"count:{deleted_count}",
+        details=f"Bulk deleted {deleted_count} offices",
+        admin_id=current_user.id,
+    )
+    return {"deleted_count": deleted_count, "message": f"Deleted {deleted_count} office(s)."}
+
+
+# ==========================
 # DELETE OFFICE BY ID
 # ==========================
 @router.delete("/{id}")

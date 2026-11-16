@@ -433,12 +433,16 @@ def update_candidate(
         if not mcs_number:
             mcs_number = candidate.candidate_code
 
+    fields_set = getattr(candidate, "model_fields_set", getattr(candidate, "__fields_set__", set()))
+    image_url_explicit = "image_url" in fields_set
+
     command = UpdateCandidateCommand(
         candidate_id=id,
         candidate_code=candidate.candidate_code,
         name=candidate.name,
         office_code=candidate.office_code,
         image_url=candidate.image_url,
+        image_url_set=image_url_explicit,
         manifesto_title=candidate.manifesto_title,
         manifesto=candidate.manifesto,
         mcs_number=mcs_number,

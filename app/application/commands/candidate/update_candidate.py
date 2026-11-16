@@ -3,6 +3,7 @@ from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy import func
 from ....domain import candidate as models, office as model
+from ....core.utils import delete_candidate_image_file
 
 @dataclass(frozen=True)
 class UpdateCandidateCommand:
@@ -11,6 +12,7 @@ class UpdateCandidateCommand:
     name: str
     office_code: str
     image_url: Optional[str] = None
+    image_url_set: bool = False
     manifesto_title: Optional[str] = None
     manifesto: Optional[str] = None
     mcs_number: Optional[str] = None
@@ -73,8 +75,25 @@ class UpdateCandidateHandler:
             "station": command.station,
             "file_no": clean_file,
         }
-        if command.image_url is not None:
-            update_data["image_url"] = command.image_url
+
+        # Handle candidate image updating / removal
+        if command.image_url_set or command.image_url is not None:
+            if command.image_url:
+                clean_img = command.image_url.strip()
+                if clean_img:
+                    if candidate.image_url and candidate.image_url != clean_img:
+                        delete_candidate_image_file(candidate.image_url)
+                    update_data["image_url"] = clean_img
+                else:
+                    # User passed empty string "" -> completely remove image and delete file
+                    if candidate.image_url:
+                        delete_candidate_image_file(candidate.image_url)
+                    update_data["image_url"] = None
+            else:
+                # User passed None/null -> completely remove image and delete file
+                if candidate.image_url:
+                    delete_candidate_image_file(candidate.image_url)
+                update_data["image_url"] = None
 
         candidate_query.update(update_data)
         self.db.commit()

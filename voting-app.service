@@ -1,0 +1,15 @@
+[Unit]
+Description=Python Voting App FastAPI Application
+After=network.target
+
+[Service]
+User=root
+Group=root
+WorkingDirectory=/root/Python_voting_app_BE
+Environment="PATH=/root/Python_voting_app_BE/venv/bin"
+ExecStart=/root/Python_voting_app_BE/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8100 --workers 3
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

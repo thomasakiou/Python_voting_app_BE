@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 import logging
@@ -336,3 +337,97 @@ def verify_accreditation_otp(
         "masked_phone": mask_phone(user.phone),
         "device_info": user.device_info,
     }
+
+
+# ============================================================
+# OPEN PUBLIC STATUS CHECK: CHECK ACCREDITATION BY MCS NUMBER
+# (No login or role restriction required)
+# ============================================================
+def _build_status_response(user: user_models.User) -> otp_schemas.AccreditationStatusCheckResponse:
+    if not user.is_active or not getattr(user, 'staff_active', True):
+        status_label = "Disqualified / Inactive"
+        message = f"Voter {user.full_name} ({user.username}) is currently inactive or disqualified from voting in this election."
+    elif user.is_accredited:
+        status_label = "Accredited"
+        message = f"Voter {user.full_name} ({user.username}) is ACCREDITED and cleared to vote on election day."
+    else:
+        status_label = "Not Accredited"
+        message = f"Voter {user.full_name} ({user.username}) is in the register but has NOT yet completed accreditation."
+
+    return otp_schemas.AccreditationStatusCheckResponse(
+        username=user.username,
+        full_name=user.full_name,
+        is_accredited=bool(user.is_accredited),
+        is_active=bool(user.is_active),
+        accredited_at=user.accredited_at,
+        staff_file_no=user.staff_file_no,
+        staff_station=user.staff_station,
+        staff_rank=user.staff_rank,
+        masked_phone=mask_phone(user.phone) if user.phone else None,
+        masked_email=mask_email(user.email) if user.email else None,
+        status_label=status_label,
+        message=message,
+    )
+
+
+@router.post("/check-status", response_model=otp_schemas.AccreditationStatusCheckResponse)
+def check_voter_accreditation_status_post(
+    payload: otp_schemas.AccreditationStatusCheckRequest,
+    db: Session = Depends(database.get_db),
+):
+    """
+    Public open status check: anyone can verify if an MCS number is accredited.
+    No authentication or admin role required.
+    """
+    username = payload.username.strip()
+    if not username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please provide an MCS number to check accreditation status.",
+        )
+
+    user = (
+        db.query(user_models.User)
+        .filter(func.lower(user_models.User.username) == username.lower())
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Voter with MCS number '{username}' was not found in the voters register. Please verify the number.",
+        )
+
+    return _build_status_response(user)
+
+
+@router.get("/status/{username}", response_model=otp_schemas.AccreditationStatusCheckResponse)
+def check_voter_accreditation_status_get(
+    username: str,
+    db: Session = Depends(database.get_db),
+):
+    """
+    Public open status check (GET variant for direct linking or bookmarking).
+    No authentication or admin role required.
+    """
+    clean_username = username.strip()
+    if not clean_username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please provide an MCS number to check accreditation status.",
+        )
+
+    user = (
+        db.query(user_models.User)
+        .filter(func.lower(user_models.User.username) == clean_username.lower())
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Voter with MCS number '{clean_username}' was not found in the voters register. Please verify the number.",
+        )
+
+    return _build_status_response(user)
+

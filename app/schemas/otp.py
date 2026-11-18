@@ -76,3 +76,25 @@ class AccreditationVerifyOTPRequest(BaseModel):
     email: Optional[str] = None
     device_id: Optional[str] = None
     device_info: Optional[str] = None
+
+
+class AccreditationStatusCheckRequest(BaseModel):
+    """Open public status check: Query by 4-digit MCS number."""
+    username: str
+
+
+class AccreditationStatusCheckResponse(BaseModel):
+    """Public accreditation status report with safe non-sensitive details."""
+    username: str
+    full_name: str
+    is_accredited: bool
+    is_active: bool
+    accredited_at: Optional[datetime] = None
+    staff_file_no: Optional[str] = None
+    staff_station: Optional[str] = None
+    staff_rank: Optional[str] = None
+    masked_phone: Optional[str] = None
+    masked_email: Optional[str] = None
+    status_label: str  # "Accredited" | "Not Accredited" | "Disqualified"
+    message: str
+

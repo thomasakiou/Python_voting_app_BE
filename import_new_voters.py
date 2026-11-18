@@ -10,29 +10,63 @@ import csv
 import psycopg2
 from passlib.context import CryptContext
 
-# Database configuration (defaults to local .env or fallback)
-DB_HOST = os.getenv("DATABASE_HOSTNAME", "localhost")
-DB_PORT = os.getenv("DATABASE_PORT", "5432")
-DB_NAME = os.getenv("DATABASE_NAME", "voting")
-DB_USER = os.getenv("DATABASE_USERNAME", "postgres")
-DB_PASS = os.getenv("DATABASE_PASSWORD", "ebimobowei81")
+# Add project root to sys.path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-CSV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "new.csv")
+try:
+    from app.core.config import settings
+    DB_HOST = settings.database_hostname
+    DB_PORT = settings.database_port
+    DB_NAME = settings.database_name
+    DB_USER = settings.database_username
+    DB_PASS = settings.database_password
+except Exception as e:
+    DB_HOST = os.getenv("DATABASE_HOSTNAME", "localhost")
+    DB_PORT = os.getenv("DATABASE_PORT", "5432")
+    DB_NAME = os.getenv("DATABASE_NAME", "voting")
+    DB_USER = os.getenv("DATABASE_USERNAME", "postgres")
+    DB_PASS = os.getenv("DATABASE_PASSWORD", "ebimobowei81")
+
+# Locate new.csv
+CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "new.csv")
 if not os.path.exists(CSV_PATH):
-    # Try current directory
+    CSV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "new.csv")
+if not os.path.exists(CSV_PATH):
     CSV_PATH = "new.csv"
 
+def get_connection():
+    # Attempt 1: Using app .env credentials
+    try:
+        return psycopg2.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASS
+        )
+    except psycopg2.OperationalError as e:
+        # Attempt 2: If on Linux server running as root/postgres, try local unix domain socket
+        try:
+            return psycopg2.connect(dbname=DB_NAME, user="postgres")
+        except Exception:
+            # Attempt 3: Local socket with 127.0.0.1
+            try:
+                return psycopg2.connect(
+                    host="127.0.0.1",
+                    port=DB_PORT,
+                    dbname=DB_NAME,
+                    user=DB_USER,
+                    password=DB_PASS
+                )
+            except Exception:
+                raise e
+
 def run_import(disambiguate: bool = True):
-    print(f"Connecting to database '{DB_NAME}' at {DB_HOST}:{DB_PORT} as '{DB_USER}'...")
-    conn = psycopg2.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASS
-    )
+    print(f"Connecting to database '{DB_NAME}'...")
+    conn = get_connection()
     conn.autocommit = False
     cur = conn.cursor()
+    print("Database connection established successfully.")
 
     # Ensure schema columns exist
     statements = [

@@ -285,19 +285,19 @@ def export_voters_pdf(
         'DocTitle',
         parent=styles['Heading1'],
         fontName='Helvetica-Bold',
-        fontSize=18,
+        fontSize=14,
         textColor=colors.HexColor('#1e293b'),
         alignment=1,
-        spaceAfter=6,
+        spaceAfter=4,
     )
     subtitle_style = ParagraphStyle(
         'DocSubtitle',
         parent=styles['Normal'],
         fontName='Helvetica',
-        fontSize=10,
+        fontSize=9,
         textColor=colors.HexColor('#64748b'),
         alignment=1,
-        spaceAfter=15,
+        spaceAfter=12,
     )
     cell_style = ParagraphStyle(
         'Cell',
@@ -345,21 +345,21 @@ def export_voters_pdf(
             Paragraph(fullname_safe, cell_style),
             Paragraph(phone_safe, cell_style),
             Paragraph(email_safe, cell_style),
-            Paragraph(f"<font color='{accredited_color}'><b>{'YES' if v.is_accredited else 'NO'}</b></font>", cell_style),
-            Paragraph(f"<font color='{status_color}'><b>{'ACTIVE' if v.is_active else 'DISABLED'}</b></font>", cell_style),
+            Paragraph(f"<b>{'YES' if v.is_accredited else 'NO'}</b>", cell_style),
+            Paragraph(f"<b>{'ACTIVE' if v.is_active else 'DISABLED'}</b>", cell_style),
             Paragraph(eligibility, cell_style),
         ])
 
     table = Table(data, colWidths=[65, 140, 95, 170, 75, 90, 95])
     table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4f46e5')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#334155')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
         ('TOPPADDING', (0, 0), (-1, 0), 6),
         ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
         ('TOPPADDING', (0, 1), (-1, -1), 4),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
     ]))
 

@@ -33,6 +33,8 @@ def auto_upgrade_schema():
     Uses AUTOCOMMIT so each ALTER TABLE is immediately committed and errors in one don't abort others.
     """
     statements = [
+        "ALTER TABLE users ALTER COLUMN full_name TYPE VARCHAR(150);",
+        "ALTER TABLE users ALTER COLUMN phone TYPE VARCHAR(50);",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_accredited BOOLEAN DEFAULT FALSE;",

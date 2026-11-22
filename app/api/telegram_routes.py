@@ -72,22 +72,32 @@ def handle_telegram_incoming_message(message: dict, db: Session):
         except Exception as e:
             logger.error(f"Error sending Telegram reply: {e}")
 
-    # ── 1. CHECK IF PHONE NUMBER WAS PROVIDED (via Contact Card OR Typed in Chat) ──
-    raw_phone = None
+    # ── 1. CONTACT SHARING (Only verified native Telegram Contact Card accepted) ──
     contact = message.get("contact")
     if contact and contact.get("phone_number"):
-        raw_phone = contact.get("phone_number")
-    elif text and not text.startswith("/"):
-        cleaned_digits = "".join(ch for ch in text if ch.isdigit())
-        if len(cleaned_digits) >= 10:
-            raw_phone = text
+        # Security Verification: Ensure the contact belongs to the sender's own Telegram account
+        contact_user_id = contact.get("user_id")
+        sender_id = from_user.get("id")
+        if contact_user_id and sender_id and str(contact_user_id) != str(sender_id):
+            reply_tg(
+                "🚫 *Security Alert: Impersonation Blocked*\n\n"
+                "You can only share your *own* phone number directly from your active Telegram app.\n\n"
+                "Please tap the *'📱 Share My Phone Number'* button below.",
+                reply_markup={
+                    "keyboard": [[{"text": "📱 Share My Phone Number", "request_contact": True}]],
+                    "resize_keyboard": True,
+                    "one_time_keyboard": True,
+                },
+            )
+            logger.warning(f"[Telegram Security] Impersonation attempt: Sender {sender_id} shared contact of user {contact_user_id}")
+            return
 
-    if raw_phone:
+        raw_phone = contact.get("phone_number")
         shared_suffix = _extract_last_10_digits(raw_phone)
         if not shared_suffix:
             reply_tg(
                 "❌ *Invalid Phone Number*\n\n"
-                "The phone number could not be processed. Please enter a valid 10 or 11 digit Nigerian phone number.",
+                "The phone number shared from Telegram could not be processed. Please try again.",
                 reply_markup={"remove_keyboard": True},
             )
             return
@@ -205,10 +215,9 @@ def handle_telegram_incoming_message(message: dict, db: Session):
         reply_tg(
             "🗳️ *Welcome to the NECO MCS Election OTP Bot!*\n\n"
             "To receive your Election OTPs here, please verify your registered phone number:\n\n"
-            "👉 Tap the *'📱 Share My Phone Number'* button below\n"
-            "OR\n"
-            "👉 Simply send your phone number (e.g. `07069244957` or `7069244957`)\n\n"
-            "🔒 _Your phone number will be matched against the official NECO MCS voters roll._",
+            "👉 Tap the *'📱 Share My Phone Number'* button below.\n\n"
+            "🔒 _For election integrity and security, manual typing of phone numbers is disabled. "
+            "Telegram will securely confirm the SIM card registered on your active device._",
             reply_markup=keyboard,
         )
         return
@@ -230,10 +239,16 @@ def handle_telegram_incoming_message(message: dict, db: Session):
                 f"Accredited: {'Yes ✅' if user.is_accredited else 'Pending ⏳'}",
             )
         else:
+            keyboard = {
+                "keyboard": [[{"text": "📱 Share My Phone Number", "request_contact": True}]],
+                "resize_keyboard": True,
+                "one_time_keyboard": True,
+            }
             reply_tg(
                 "❌ *Not Connected*\n\n"
                 "Your Telegram account is not yet linked to any voter.\n\n"
-                "Send your phone number (e.g. `07069244957` or `7069244957`) or send /start to link.",
+                "Tap the button below to link your registered phone number:",
+                reply_markup=keyboard,
             )
         return
 
@@ -251,7 +266,7 @@ def handle_telegram_incoming_message(message: dict, db: Session):
             reply_tg(
                 f"ℹ️ *Unlinked Successfully*\n\n"
                 f"Your Telegram account has been disconnected from voter *{user.full_name}* (MCS: `{user.username}`).\n\n"
-                f"You will no longer receive OTPs here. Send your phone number anytime to re-link.",
+                f"You will no longer receive OTPs here. Tap /start anytime to re-link.",
                 reply_markup={"remove_keyboard": True},
             )
         else:
@@ -261,9 +276,26 @@ def handle_telegram_incoming_message(message: dict, db: Session):
             )
         return
 
-    # ── 4. Any other text → Inform user ──
+    # ── 4. Any other text (including manually typed numbers) → Security notice ──
+    keyboard = {
+        "keyboard": [
+            [
+                {
+                    "text": "📱 Share My Phone Number",
+                    "request_contact": True,
+                }
+            ]
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": True,
+    }
     reply_tg(
-        "ℹ️ Please send your registered phone number (e.g. `07069244957` or `7069244957`) or tap /start to verify and link your account."
+        "🔒 *Security Notice: Manual Typing Disabled*\n\n"
+        "To prevent voter impersonation and protect your vote, "
+        "the bot *does not accept manually typed phone numbers*.\n\n"
+        "👉 Please tap the *'📱 Share My Phone Number'* button below. "
+        "Telegram will securely confirm the SIM card registered on your active device.",
+        reply_markup=keyboard,
     )
 
 

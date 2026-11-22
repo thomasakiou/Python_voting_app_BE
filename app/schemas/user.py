@@ -78,6 +78,8 @@ class UserOut(UserBase):
     staff_conraiss: Optional[str] = None
     staff_active: Optional[bool] = True
     admin_login_count: Optional[int] = 0
+    telegram_chat_id: Optional[str] = None
+    telegram_username: Optional[str] = None
 
     class Config:
         from_attributes = True

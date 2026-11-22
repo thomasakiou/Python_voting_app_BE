@@ -36,5 +36,6 @@ class User(Base):
     # Telegram Delivery Fields
     telegram_chat_id = Column(String(100), nullable=True)
     telegram_username = Column(String(100), nullable=True)
+    telegram_link_session = Column(String(100), nullable=True)
 
     votes = relationship("Vote", back_populates="user")

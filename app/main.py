@@ -50,6 +50,7 @@ def auto_upgrade_schema():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_active BOOLEAN DEFAULT TRUE;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_chat_id VARCHAR(100);",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_username VARCHAR(100);",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_link_session VARCHAR(100);",
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS is_disqualified BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS image_url TEXT;",

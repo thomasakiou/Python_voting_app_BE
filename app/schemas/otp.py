@@ -37,6 +37,8 @@ class AccreditationValidateResponse(BaseModel):
     staff_rank: Optional[str] = None
     staff_conraiss: Optional[str] = None
     staff_active: Optional[bool] = True
+    has_telegram: Optional[bool] = False
+    telegram_username: Optional[str] = None
     message: Optional[str] = None
 
 

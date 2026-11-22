@@ -89,6 +89,8 @@ def lookup_voter_contact(
         staff_active=user.staff_active if user.staff_active is not None else True,
         has_email=has_email,
         has_phone=has_phone,
+        has_telegram=bool(user.telegram_chat_id),
+        telegram_username=user.telegram_username,
         is_accredited=user.is_accredited,
         is_active=user.is_active,
         message="Voter record loaded successfully.",

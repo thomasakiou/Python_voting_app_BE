@@ -101,6 +101,8 @@ def validate_voter_for_accreditation(
         staff_rank=user.staff_rank,
         staff_conraiss=user.staff_conraiss,
         staff_active=user.staff_active if user.staff_active is not None else True,
+        has_telegram=bool(user.telegram_chat_id),
+        telegram_username=user.telegram_username,
         message="Voter identity confirmed. Please review your details and request your OTP.",
     )
 

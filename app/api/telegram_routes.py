@@ -8,8 +8,9 @@ from sqlalchemy import func
 from pydantic import BaseModel
 from typing import Optional
 
-from ..core import database
+from ..core import database, oauth2
 from ..core.config import settings
+from ..core.audit import record_audit_log
 from ..core.otp_utils import normalize_nigerian_phone, send_otp_telegram
 from ..domain import user as user_models
 
@@ -236,6 +237,30 @@ def handle_telegram_incoming_message(message: dict, db: Session):
             )
         return
 
+    # ── 3b. /unlink COMMAND → Self-service unlinking from Telegram ──
+    if text.startswith("/unlink"):
+        user = (
+            db.query(user_models.User)
+            .filter(user_models.User.telegram_chat_id == chat_id)
+            .first()
+        )
+        if user:
+            user.telegram_chat_id = None
+            user.telegram_username = None
+            db.commit()
+            reply_tg(
+                f"ℹ️ *Unlinked Successfully*\n\n"
+                f"Your Telegram account has been disconnected from voter *{user.full_name}* (MCS: `{user.username}`).\n\n"
+                f"You will no longer receive OTPs here. Send your phone number anytime to re-link.",
+                reply_markup={"remove_keyboard": True},
+            )
+        else:
+            reply_tg(
+                "Your Telegram account is not linked to any voter.",
+                reply_markup={"remove_keyboard": True},
+            )
+        return
+
     # ── 4. Any other text → Inform user ──
     reply_tg(
         "ℹ️ Please send your registered phone number (e.g. `07069244957` or `7069244957`) or tap /start to verify and link your account."
@@ -404,3 +429,83 @@ def test_send_telegram(
         "voter": user.full_name,
         "telegram_username": user.telegram_username,
     }
+
+
+# ============================================================
+# UNLINK TELEGRAM ACCOUNT (Admin / Super-Admin only)
+# ============================================================
+@router.post("/unlink/{username}")
+def unlink_voter_telegram(
+    username: str,
+    db: Session = Depends(database.get_db),
+    current_admin: user_models.User = Depends(oauth2.get_current_user),
+):
+    """
+    Allows Super Admin and Admin to unlink a voter's Telegram account.
+    """
+    if current_admin.role not in ("admin", "super-admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can unlink voter Telegram accounts.",
+        )
+
+    user = (
+        db.query(user_models.User)
+        .filter(func.lower(user_models.User.username) == username.strip().lower())
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail=f"Voter '{username}' not found.")
+
+    old_chat_id = user.telegram_chat_id
+    old_tg_user = user.telegram_username
+
+    if not old_chat_id:
+        return {
+            "success": True,
+            "message": f"Voter '{user.full_name}' (MCS: {user.username}) does not have a linked Telegram account.",
+            "username": user.username,
+        }
+
+    # Notify voter on Telegram
+    bot_token = getattr(settings, "telegram_bot_token", None)
+    if bot_token and old_chat_id:
+        try:
+            requests.post(
+                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                json={
+                    "chat_id": old_chat_id,
+                    "text": (
+                        f"ℹ️ *Telegram Account Unlinked*\n\n"
+                        f"Hello *{user.full_name}*,\n"
+                        f"Your Telegram account has been unlinked from NECO MCS Voter ID: *{user.username}* by an election administrator.\n\n"
+                        f"You will no longer receive OTPs here until re-linked.\n\n"
+                        f"🏛️ _NECO MCS Electoral Committee (ELECO)_"
+                    ),
+                    "parse_mode": "Markdown",
+                },
+                timeout=10,
+            )
+        except Exception as e:
+            logger.warning(f"Could not send unlink notice to voter: {e}")
+
+    user.telegram_chat_id = None
+    user.telegram_username = None
+    db.commit()
+
+    record_audit_log(
+        db,
+        action="UNLINK_TELEGRAM",
+        actor_id=current_admin.id,
+        actor_role=current_admin.role,
+        target_type="user",
+        target_id=user.id,
+        details=f"Admin '{current_admin.username}' unlinked Telegram ({old_tg_user or old_chat_id}) for voter '{user.username}' ({user.full_name}).",
+    )
+
+    return {
+        "success": True,
+        "message": f"Successfully unlinked Telegram for voter '{user.full_name}' (MCS: {user.username}).",
+        "username": user.username,
+    }
+

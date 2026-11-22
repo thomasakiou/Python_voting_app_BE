@@ -23,6 +23,8 @@ class VoterContactLookupResponse(BaseModel):
     has_phone: bool
     is_accredited: bool
     is_active: bool
+    has_telegram: Optional[bool] = False
+    telegram_username: Optional[str] = None
     message: Optional[str] = None
 
 

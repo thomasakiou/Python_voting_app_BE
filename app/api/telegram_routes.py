@@ -40,10 +40,12 @@ def _extract_last_10_digits(phone: str) -> str | None:
 def handle_telegram_incoming_message(message: dict, db: Session):
     """
     Phone-number-only linking system.
-    - /start  → shows the "Share Phone Number" button
-    - Contact → matches phone against registered voters, one-time link only
-    - /status → check link status
-    All other commands are ignored.
+    Supports:
+      1. Tapping "Share My Phone Number" button (Telegram Contact).
+      2. Typing phone number directly in chat (e.g. 07069244957 or 7069244957).
+      3. /start - Shows instructions & contact button.
+      4. /status - Checks current link status.
+    All matching normalizes both 07069244957 and 7069244957 to the same 10-digit suffix.
     """
     if not message:
         return
@@ -69,121 +71,109 @@ def handle_telegram_incoming_message(message: dict, db: Session):
         except Exception as e:
             logger.error(f"Error sending Telegram reply: {e}")
 
-    # ── 1. CONTACT SHARING (Phone-number verification & one-time link) ──
+    # ── 1. CHECK IF PHONE NUMBER WAS PROVIDED (via Contact Card OR Typed in Chat) ──
+    raw_phone = None
     contact = message.get("contact")
-    if contact:
-        # Security: Telegram only allows sharing your OWN contact via request_contact.
-        # The from.id must match the contact.user_id to prove ownership.
-        contact_user_id = contact.get("user_id")
-        sender_id = from_user.get("id")
-        if contact_user_id and sender_id and str(contact_user_id) != str(sender_id):
-            reply_tg(
-                "🚫 *Security Violation*\n\n"
-                "You can only share your *own* phone number, not someone else's contact.\n\n"
-                "Please tap the *'📱 Share My Phone Number'* button to share your own verified number.",
-                reply_markup={"remove_keyboard": True},
-            )
-            logger.warning(
-                f"[Telegram] User {sender_id} tried to share contact of user {contact_user_id} — blocked."
-            )
-            return
+    if contact and contact.get("phone_number"):
+        raw_phone = contact.get("phone_number")
+    elif text and not text.startswith("/"):
+        cleaned_digits = "".join(ch for ch in text if ch.isdigit())
+        if len(cleaned_digits) >= 10:
+            raw_phone = text
 
-        raw_phone = contact.get("phone_number", "")
+    if raw_phone:
         shared_suffix = _extract_last_10_digits(raw_phone)
-
         if not shared_suffix:
             reply_tg(
                 "❌ *Invalid Phone Number*\n\n"
-                "The phone number shared could not be processed. Please try again.",
+                "The phone number could not be processed. Please enter a valid 10 or 11 digit Nigerian phone number.",
                 reply_markup={"remove_keyboard": True},
             )
             return
 
-        # Check if this Telegram account is already linked to a voter
-        already_linked = (
+        # 1. Match voter by phone number (matches 07069244957, 7069244957, +2347069244957)
+        matched_voter = (
             db.query(user_models.User)
-            .filter(user_models.User.telegram_chat_id == chat_id)
+            .filter(user_models.User.phone.like(f"%{shared_suffix}"))
             .first()
         )
-        if already_linked:
-            reply_tg(
-                f"⚠️ *Already Linked*\n\n"
-                f"Your Telegram account is already linked to voter *{already_linked.full_name}* "
-                f"(MCS: `{already_linked.username}`).\n\n"
-                f"Each Telegram account can only be linked once. "
-                f"If you need to change your linked account, please contact the Electoral Committee (ELECO).",
-                reply_markup={"remove_keyboard": True},
-            )
-            return
-
-        # Find voter by matching the last 10 digits of the phone number
-        all_voters = (
-            db.query(user_models.User)
-            .filter(user_models.User.phone.isnot(None))
-            .all()
-        )
-        matched_voter = None
-        for voter in all_voters:
-            voter_suffix = _extract_last_10_digits(voter.phone)
-            if voter_suffix and voter_suffix == shared_suffix:
-                matched_voter = voter
-                break
+        if not matched_voter:
+            all_voters = db.query(user_models.User).filter(user_models.User.phone.isnot(None)).all()
+            for v in all_voters:
+                if _extract_last_10_digits(v.phone) == shared_suffix:
+                    matched_voter = v
+                    break
 
         if not matched_voter:
+            clean_display = raw_phone.strip()
             reply_tg(
-                "❌ *Phone Number Not Registered*\n\n"
-                "The phone number you shared does not match any registered voter "
-                "in the NECO MCS Electoral System.\n\n"
-                "⚠️ Only voters whose phone numbers are registered on the official "
-                "NECO MCS voters roll can link their Telegram accounts.\n\n"
-                "If you believe this is an error, please contact the Electoral Committee (ELECO).",
+                f"❌ *Phone Number Not Registered*\n\n"
+                f"The phone number `{clean_display}` (suffix `{shared_suffix}`) does not match any registered voter in the NECO MCS Electoral System.\n\n"
+                f"⚠️ Only registered voters with matching phone numbers on the official voters roll can link their accounts.\n\n"
+                f"If you believe this is an error, please contact the Electoral Committee (ELECO).",
                 reply_markup={"remove_keyboard": True},
             )
-            logger.info(f"[Telegram] Phone '{raw_phone}' not found in voters roll. chat_id={chat_id}")
+            logger.warning(f"[Telegram] Phone '{raw_phone}' (suffix {shared_suffix}) not found. chat_id={chat_id}")
             return
 
-        # Check if this voter's account is already linked to a DIFFERENT Telegram
+        # 2. Check if this voter is ALREADY linked to this EXACT chat_id
+        if matched_voter.telegram_chat_id == chat_id:
+            reply_tg(
+                f"✅ *Already Connected!*\n\n"
+                f"Hello *{matched_voter.full_name}*,\n"
+                f"Your Telegram is already securely linked to your Voter ID: *{matched_voter.username}*.\n"
+                f"Registered Phone: `{matched_voter.phone}`\n\n"
+                f"You will receive all Election OTPs and notifications right here.",
+                reply_markup={"remove_keyboard": True},
+            )
+            return
+
+        # 3. Check if this voter is already linked to a DIFFERENT Telegram account
         if matched_voter.telegram_chat_id and matched_voter.telegram_chat_id != chat_id:
             reply_tg(
-                "🚫 *Account Already Linked*\n\n"
-                "This voter account is already linked to a different Telegram account.\n\n"
-                "Each voter can only link their Telegram *once*. "
-                "If you believe this is an error, please contact the Electoral Committee (ELECO).",
+                f"🚫 *Account Already Linked*\n\n"
+                f"Voter profile *{matched_voter.full_name}* (MCS: `{matched_voter.username}`) is already linked to another Telegram account.\n\n"
+                f"Each voter can only link their Telegram once. Please contact the Electoral Committee (ELECO) if you need to update your registered account.",
                 reply_markup={"remove_keyboard": True},
             )
-            logger.warning(
-                f"[Telegram] Voter '{matched_voter.username}' already linked to chat_id "
-                f"'{matched_voter.telegram_chat_id}', rejected re-link attempt from chat_id '{chat_id}'."
+            logger.warning(f"[Telegram] Voter '{matched_voter.username}' already linked to chat {matched_voter.telegram_chat_id}")
+            return
+
+        # 4. Check if this Telegram chat is already linked to a DIFFERENT voter
+        other_voter = (
+            db.query(user_models.User)
+            .filter(user_models.User.telegram_chat_id == chat_id)
+            .filter(user_models.User.id != matched_voter.id)
+            .first()
+        )
+        if other_voter:
+            reply_tg(
+                f"⚠️ *Telegram Account Already In Use*\n\n"
+                f"This Telegram account is currently linked to another voter (*{other_voter.full_name}*, MCS: `{other_voter.username}`).\n\n"
+                f"Each Telegram account can only be used by one voter.",
+                reply_markup={"remove_keyboard": True},
             )
             return
 
-        # ✅ Phone matched & not yet linked → link now
+        # 5. Successfully Link!
         matched_voter.telegram_chat_id = chat_id
-        matched_voter.telegram_username = (
-            f"@{tg_username}" if not tg_username.startswith("@") else tg_username
-        )
+        matched_voter.telegram_username = f"@{tg_username}" if not tg_username.startswith("@") else tg_username
         db.commit()
 
         reply_tg(
             f"✅ *Phone Number Verified & Linked!*\n\n"
             f"Hello *{matched_voter.full_name}*,\n"
-            f"Your Telegram account has been securely linked to your NECO MCS Voter ID: "
-            f"*{matched_voter.username}*.\n\n"
-            f"You will now receive all your *Election OTPs* and verification codes "
-            f"instantly right here.\n\n"
-            f"🔒 _This link is permanent and cannot be changed without ELECO approval._\n\n"
+            f"Your Telegram account has been linked to your NECO MCS Voter ID: *{matched_voter.username}*.\n"
+            f"Verified Phone: `{matched_voter.phone}`\n\n"
+            f"You will now receive all your *Election OTPs* and verification codes instantly right here.\n\n"
             f"🏛️ _NECO MCS Electoral Committee (ELECO)_",
             reply_markup={"remove_keyboard": True},
         )
-        logger.info(
-            f"[Telegram] Linked voter '{matched_voter.username}' ({matched_voter.full_name}) "
-            f"via phone match to chat_id '{chat_id}'."
-        )
+        logger.info(f"[Telegram] Successfully linked voter '{matched_voter.username}' ({matched_voter.full_name}) to chat_id '{chat_id}'")
         return
 
-    # ── 2. /start COMMAND → Show phone share button ──
+    # ── 2. /start COMMAND → Show phone share button and instructions ──
     if text.startswith("/start"):
-        # Check if already linked
         already_linked = (
             db.query(user_models.User)
             .filter(user_models.User.telegram_chat_id == chat_id)
@@ -191,9 +181,9 @@ def handle_telegram_incoming_message(message: dict, db: Session):
         )
         if already_linked:
             reply_tg(
-                f"ℹ️ *Already Connected*\n\n"
-                f"Your Telegram is linked to voter *{already_linked.full_name}* "
-                f"(MCS: `{already_linked.username}`).\n\n"
+                f"ℹ️ *Already Connected* ✅\n\n"
+                f"Your Telegram is linked to voter *{already_linked.full_name}* (MCS: `{already_linked.username}`).\n"
+                f"Registered Phone: `{already_linked.phone}`\n\n"
                 f"You will receive all OTPs and election notifications here automatically.",
                 reply_markup={"remove_keyboard": True},
             )
@@ -213,11 +203,11 @@ def handle_telegram_incoming_message(message: dict, db: Session):
         }
         reply_tg(
             "🗳️ *Welcome to the NECO MCS Election OTP Bot!*\n\n"
-            "To receive your Election OTPs here, we need to verify your identity "
-            "using your *registered phone number*.\n\n"
-            "👇 Tap the button below to securely share your phone number:\n\n"
-            "🔒 _Your phone number will be matched against the official NECO MCS "
-            "voters roll. Only registered voters can link their accounts._",
+            "To receive your Election OTPs here, please verify your registered phone number:\n\n"
+            "👉 Tap the *'📱 Share My Phone Number'* button below\n"
+            "OR\n"
+            "👉 Simply send your phone number (e.g. `07069244957` or `7069244957`)\n\n"
+            "🔒 _Your phone number will be matched against the official NECO MCS voters roll._",
             reply_markup=keyboard,
         )
         return
@@ -234,23 +224,21 @@ def handle_telegram_incoming_message(message: dict, db: Session):
                 f"ℹ️ *Status: Connected* ✅\n\n"
                 f"Voter: *{user.full_name}*\n"
                 f"MCS Number: `{user.username}`\n"
+                f"Registered Phone: `{user.phone}`\n"
                 f"Station: {user.staff_station or 'N/A'}\n"
                 f"Accredited: {'Yes ✅' if user.is_accredited else 'Pending ⏳'}",
             )
         else:
             reply_tg(
                 "❌ *Not Connected*\n\n"
-                "Your Telegram account is not linked to any voter.\n\n"
-                "Send /start to begin the phone verification process.",
+                "Your Telegram account is not yet linked to any voter.\n\n"
+                "Send your phone number (e.g. `07069244957` or `7069244957`) or send /start to link.",
             )
         return
 
     # ── 4. Any other text → Inform user ──
     reply_tg(
-        "ℹ️ This bot only supports phone-number-based linking.\n\n"
-        "Available commands:\n"
-        "• /start — Begin phone verification\n"
-        "• /status — Check your link status",
+        "ℹ️ Please send your registered phone number (e.g. `07069244957` or `7069244957`) or tap /start to verify and link your account."
     )
 
 

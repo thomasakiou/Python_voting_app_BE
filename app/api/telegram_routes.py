@@ -525,15 +525,18 @@ def unlink_voter_telegram(
     user.telegram_username = None
     db.commit()
 
-    record_audit_log(
-        db,
-        action="UNLINK_TELEGRAM",
-        actor_id=current_admin.id,
-        actor_role=current_admin.role,
-        target_type="user",
-        target_id=user.id,
-        details=f"Admin '{current_admin.username}' unlinked Telegram ({old_tg_user or old_chat_id}) for voter '{user.username}' ({user.full_name}).",
-    )
+    try:
+        record_audit_log(
+            db=db,
+            admin_username=current_admin.username,
+            action="UNLINK_TELEGRAM",
+            target_type="USER",
+            target_id=str(user.username),
+            details=f"Admin '{current_admin.username}' unlinked Telegram ({old_tg_user or old_chat_id}) for voter '{user.username}' ({user.full_name}).",
+            admin_id=current_admin.id,
+        )
+    except Exception as e:
+        logger.warning(f"Could not record unlink audit log: {e}")
 
     return {
         "success": True,

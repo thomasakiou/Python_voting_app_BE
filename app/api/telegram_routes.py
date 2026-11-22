@@ -36,17 +36,27 @@ def _extract_last_10_digits(phone: str) -> str | None:
 
 
 # ============================================================
+# In-memory store for pending link sessions: chat_id → username
+# When a voter opens the bot via deep link /start <username>,
+# we remember which username they intend to link. When they
+# share their phone, we verify the phone belongs to that username.
+# ============================================================
+_pending_link_sessions: dict[str, str] = {}
+
+
+# ============================================================
 # CORE MESSAGE HANDLER (Webhook + Polling)
 # ============================================================
 def handle_telegram_incoming_message(message: dict, db: Session):
     """
-    Phone-number-only linking system.
-    Supports:
-      1. Tapping "Share My Phone Number" button (Telegram Contact).
-      2. Typing phone number directly in chat (e.g. 07069244957 or 7069244957).
-      3. /start - Shows instructions & contact button.
+    Secure phone-number linking with username verification.
+    Flow:
+      1. Voter clicks "Connect" on the web app → opens deep link /start <username>.
+      2. Bot stores the intended username and shows the "Share My Phone Number" button.
+      3. When voter taps the button, bot verifies that the shared phone matches
+         the stored username's registered phone. If mismatch → rejected.
       4. /status - Checks current link status.
-    All matching normalizes both 07069244957 and 7069244957 to the same 10-digit suffix.
+      5. /unlink - Self-service unlinking.
     """
     if not message:
         return
@@ -102,6 +112,33 @@ def handle_telegram_incoming_message(message: dict, db: Session):
             )
             return
 
+        # ── SECURITY: Verify phone matches the intended username from deep link ──
+        intended_username = _pending_link_sessions.get(chat_id)
+        if intended_username:
+            # Look up the voter they claimed to be
+            intended_voter = (
+                db.query(user_models.User)
+                .filter(func.lower(user_models.User.username) == intended_username.lower())
+                .first()
+            )
+            if intended_voter:
+                intended_phone_suffix = _extract_last_10_digits(intended_voter.phone) if intended_voter.phone else None
+                if intended_phone_suffix and intended_phone_suffix != shared_suffix:
+                    # Phone does NOT match the username they started with → REJECT
+                    _pending_link_sessions.pop(chat_id, None)
+                    reply_tg(
+                        f"🚫 *Phone Number Mismatch*\n\n"
+                        f"The phone number you shared does *not* match the registered phone for MCS voter `{intended_username}`.\n\n"
+                        f"⚠️ You can only link your *own* voter account. Each voter must use the phone number registered on the official voters roll.\n\n"
+                        f"If you believe this is an error, please contact the Electoral Committee (ELECO).",
+                        reply_markup={"remove_keyboard": True},
+                    )
+                    logger.warning(
+                        f"[Telegram Security] Phone mismatch: chat {chat_id} started as '{intended_username}' "
+                        f"but shared phone suffix {shared_suffix} (expected {intended_phone_suffix})"
+                    )
+                    return
+
         # 1. Match voter by phone number (matches 07069244957, 7069244957, +2347069244957)
         matched_voter = (
             db.query(user_models.User)
@@ -116,6 +153,7 @@ def handle_telegram_incoming_message(message: dict, db: Session):
                     break
 
         if not matched_voter:
+            _pending_link_sessions.pop(chat_id, None)
             clean_display = raw_phone.strip()
             reply_tg(
                 f"❌ *Phone Number Not Registered*\n\n"
@@ -127,8 +165,25 @@ def handle_telegram_incoming_message(message: dict, db: Session):
             logger.warning(f"[Telegram] Phone '{raw_phone}' (suffix {shared_suffix}) not found. chat_id={chat_id}")
             return
 
+        # Extra safety: if we had a session, verify the matched voter IS the intended voter
+        if intended_username and matched_voter.username.lower() != intended_username.lower():
+            _pending_link_sessions.pop(chat_id, None)
+            reply_tg(
+                f"🚫 *Identity Mismatch*\n\n"
+                f"You started the linking process for voter `{intended_username}`, but your phone number is registered to a different voter (*{matched_voter.full_name}*, MCS: `{matched_voter.username}`).\n\n"
+                f"⚠️ Each voter must link their *own* account using their own registered phone number.\n\n"
+                f"Please go back to the accreditation page and enter *your own* MCS number, then try again.",
+                reply_markup={"remove_keyboard": True},
+            )
+            logger.warning(
+                f"[Telegram Security] Username mismatch: chat {chat_id} started as '{intended_username}' "
+                f"but phone matched voter '{matched_voter.username}'"
+            )
+            return
+
         # 2. Check if this voter is ALREADY linked to this EXACT chat_id
         if matched_voter.telegram_chat_id == chat_id:
+            _pending_link_sessions.pop(chat_id, None)
             reply_tg(
                 f"✅ *Already Connected!*\n\n"
                 f"Hello *{matched_voter.full_name}*,\n"
@@ -141,6 +196,7 @@ def handle_telegram_incoming_message(message: dict, db: Session):
 
         # 3. Check if this voter is already linked to a DIFFERENT Telegram account
         if matched_voter.telegram_chat_id and matched_voter.telegram_chat_id != chat_id:
+            _pending_link_sessions.pop(chat_id, None)
             reply_tg(
                 f"🚫 *Account Already Linked*\n\n"
                 f"Voter profile *{matched_voter.full_name}* (MCS: `{matched_voter.username}`) is already linked to another Telegram account.\n\n"
@@ -158,6 +214,7 @@ def handle_telegram_incoming_message(message: dict, db: Session):
             .first()
         )
         if other_voter:
+            _pending_link_sessions.pop(chat_id, None)
             reply_tg(
                 f"⚠️ *Telegram Account Already In Use*\n\n"
                 f"This Telegram account is currently linked to another voter (*{other_voter.full_name}*, MCS: `{other_voter.username}`).\n\n"
@@ -170,6 +227,7 @@ def handle_telegram_incoming_message(message: dict, db: Session):
         matched_voter.telegram_chat_id = chat_id
         matched_voter.telegram_username = f"@{tg_username}" if not tg_username.startswith("@") else tg_username
         db.commit()
+        _pending_link_sessions.pop(chat_id, None)
 
         reply_tg(
             f"✅ *Phone Number Verified & Linked!*\n\n"
@@ -183,8 +241,9 @@ def handle_telegram_incoming_message(message: dict, db: Session):
         logger.info(f"[Telegram] Successfully linked voter '{matched_voter.username}' ({matched_voter.full_name}) to chat_id '{chat_id}'")
         return
 
-    # ── 2. /start COMMAND → Show phone share button and instructions ──
+    # ── 2. /start COMMAND → Store intended username & show phone share button ──
     if text.startswith("/start"):
+        # Check if already linked
         already_linked = (
             db.query(user_models.User)
             .filter(user_models.User.telegram_chat_id == chat_id)
@@ -200,6 +259,47 @@ def handle_telegram_incoming_message(message: dict, db: Session):
             )
             return
 
+        # Extract username from deep link: /start <username>
+        parts = text.split(maxsplit=1)
+        start_param = parts[1].strip() if len(parts) > 1 else None
+
+        if start_param:
+            # Validate the username exists
+            intended_voter = (
+                db.query(user_models.User)
+                .filter(func.lower(user_models.User.username) == start_param.lower())
+                .first()
+            )
+            if intended_voter:
+                _pending_link_sessions[chat_id] = start_param
+                logger.info(f"[Telegram] Linking session started: chat {chat_id} → voter '{start_param}'")
+                keyboard = {
+                    "keyboard": [
+                        [{"text": "📱 Share My Phone Number", "request_contact": True}]
+                    ],
+                    "resize_keyboard": True,
+                    "one_time_keyboard": True,
+                }
+                reply_tg(
+                    f"🗳️ *Welcome to the NECO MCS Election OTP Bot!*\n\n"
+                    f"You are linking Telegram for voter MCS: `{start_param}`.\n\n"
+                    f"To verify your identity, please share your registered phone number:\n\n"
+                    f"👉 Tap the *'📱 Share My Phone Number'* button below.\n\n"
+                    f"🔒 _Your phone number must match the one registered for MCS `{start_param}` on the official voters roll. "
+                    f"If it doesn't match, the link will be rejected._",
+                    reply_markup=keyboard,
+                )
+                return
+            else:
+                reply_tg(
+                    f"❌ *Voter Not Found*\n\n"
+                    f"MCS number `{start_param}` was not found in the electoral system.\n\n"
+                    f"Please go back to the accreditation page and verify your MCS number.",
+                    reply_markup={"remove_keyboard": True},
+                )
+                return
+
+        # No deep link parameter — generic start
         keyboard = {
             "keyboard": [
                 [
@@ -410,8 +510,8 @@ def get_telegram_link_info(username: str, db: Session = Depends(database.get_db)
         )
 
     bot_username = getattr(settings, "telegram_bot_username", "NECOMCSVotingOTPBot") or "NECOMCSVotingOTPBot"
-    # No deep link parameter — voters link via phone number only
-    deep_link = f"https://t.me/{bot_username}"
+    # Deep link with username so the bot knows which voter is linking
+    deep_link = f"https://t.me/{bot_username}?start={user.username}"
 
     return {
         "username": user.username,

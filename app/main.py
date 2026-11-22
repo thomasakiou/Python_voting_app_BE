@@ -209,10 +209,11 @@ def app_status():
 
 
 @app.on_event("startup")
-def create_super_admin():
+def startup_events():
     db = database.SessionLocal()
     init_super_admin(db)
     db.close()
+    telegram.start_telegram_polling_thread()
 
 
 # Core Routers

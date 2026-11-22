@@ -1,4 +1,6 @@
 import logging
+import threading
+import time
 import requests
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
@@ -28,25 +30,15 @@ class TelegramTestSendRequest(BaseModel):
 
 
 # ============================================================
-# 1. TELEGRAM WEBHOOK (Receives events from Telegram Bot API)
+# HELPER: Process incoming message from Webhook or Polling
 # ============================================================
-@router.post("/webhook")
-async def telegram_webhook(request: Request, db: Session = Depends(database.get_db)):
+def handle_telegram_incoming_message(message: dict, db: Session):
     """
-    Webhook called by Telegram when a user interacts with the bot.
-    Handles:
-      /start MCS_<username>  -> Automatically links voter's chat_id to their account.
-      /status                -> Checks linkage status.
-      /help                  -> Instructions.
+    Core message processor used by both Webhook and Background Polling.
+    Handles /start MCS_<username>, /link <username>, and /status.
     """
-    try:
-        data = await request.json()
-    except Exception:
-        return {"ok": True}
-
-    message = data.get("message") or data.get("edited_message")
     if not message:
-        return {"ok": True}
+        return
 
     chat = message.get("chat", {})
     chat_id = str(chat.get("id"))
@@ -62,7 +54,11 @@ async def telegram_webhook(request: Request, db: Session = Depends(database.get_
             return
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         try:
-            requests.post(url, json={"chat_id": chat_id, "text": reply_text, "parse_mode": "Markdown"}, timeout=10)
+            requests.post(
+                url,
+                json={"chat_id": chat_id, "text": reply_text, "parse_mode": "Markdown"},
+                timeout=10,
+            )
         except Exception as e:
             logger.error(f"Error sending Telegram reply: {e}")
 
@@ -98,25 +94,22 @@ async def telegram_webhook(request: Request, db: Session = Depends(database.get_
                     f"🏛️ _NECO MCS Electoral Committee (ELECO)_"
                 )
                 logger.info(f"Linked voter '{user.username}' ({user.full_name}) to Telegram chat_id '{chat_id}'")
-                return {"ok": True}
             else:
                 reply_tg(
                     f"⚠️ *Voter Not Found*\n\n"
                     f"Could not find a voter record for MCS number `{target_username}`. "
                     f"Please verify your 4-digit MCS number on the election portal."
                 )
-                return {"ok": True}
         else:
             # Bare /start command
             reply_tg(
                 f"🗳️ *Welcome to the NECO MCS Election Bot!*\n\n"
                 f"To link your account and receive instant OTPs here:\n"
-                f"1. Log in to the NECO MCS Portal: {settings.api_base_url.replace('/api', '')}\n"
+                f"1. Log in to the NECO MCS Portal\n"
                 f"2. Click the *'Connect Telegram'* button on your screen.\n\n"
-                f"Alternatively, you can send: `/link YOUR_MCS_NUMBER`\n"
+                f"Alternatively, send: `/link YOUR_MCS_NUMBER`\n"
                 f"Example: `/link 1072`"
             )
-            return {"ok": True}
 
     # Handle /link <username>
     elif text.startswith("/link"):
@@ -138,13 +131,10 @@ async def telegram_webhook(request: Request, db: Session = Depends(database.get_
                     f"Connected to voter: *{user.full_name}* (MCS: `{user.username}`).\n"
                     f"You will now receive your voting verification OTPs here."
                 )
-                return {"ok": True}
             else:
                 reply_tg(f"❌ No registered voter found with MCS number: `{target_username}`.")
-                return {"ok": True}
         else:
             reply_tg("Please provide your MCS number. Example: `/link 1072`")
-            return {"ok": True}
 
     # Handle /status
     elif text.startswith("/status"):
@@ -159,9 +149,99 @@ async def telegram_webhook(request: Request, db: Session = Depends(database.get_
             )
         else:
             reply_tg("❌ Your Telegram account is not yet linked to any voter. Send `/link YOUR_MCS_NUMBER` to connect.")
+
+
+# ============================================================
+# 1. TELEGRAM WEBHOOK (Receives events from Telegram Bot API)
+# ============================================================
+@router.post("/webhook")
+async def telegram_webhook(request: Request, db: Session = Depends(database.get_db)):
+    """
+    Webhook called by Telegram when a user interacts with the bot.
+    """
+    try:
+        data = await request.json()
+    except Exception:
         return {"ok": True}
 
+    message = data.get("message") or data.get("edited_message")
+    if message:
+        handle_telegram_incoming_message(message, db)
+
     return {"ok": True}
+
+
+# ============================================================
+# BACKGROUND LONG-POLLING WORKER (Self-healing fallback)
+# ============================================================
+def telegram_polling_worker():
+    """
+    Continuous background long-polling worker.
+    Runs when webhooks cannot receive requests (e.g. self-signed SSL or raw IP).
+    """
+    bot_token = getattr(settings, "telegram_bot_token", None)
+    if not bot_token:
+        logger.info("[Telegram Polling] No bot token configured, skipping polling.")
+        return
+
+    logger.info("[Telegram Polling] Starting Telegram background polling worker...")
+    offset = None
+
+    # Check if a failing webhook is registered; clear it so getUpdates succeeds
+    try:
+        info_resp = requests.get(f"https://api.telegram.org/bot{bot_token}/getWebhookInfo", timeout=10).json()
+        if info_resp.get("ok"):
+            hook_url = info_resp.get("result", {}).get("url")
+            last_err = info_resp.get("result", {}).get("last_error_message")
+            if hook_url and last_err:
+                logger.warning(f"[Telegram Polling] Clearing failing webhook '{hook_url}' ({last_err})")
+                requests.get(f"https://api.telegram.org/bot{bot_token}/deleteWebhook?drop_pending_updates=False", timeout=10)
+    except Exception as e:
+        logger.warning(f"[Telegram Polling] Could not check webhook info: {e}")
+
+    while True:
+        try:
+            params = {"timeout": 20}
+            if offset is not None:
+                params["offset"] = offset
+
+            resp = requests.get(
+                f"https://api.telegram.org/bot{bot_token}/getUpdates",
+                params=params,
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("ok"):
+                    for update in data.get("result", []):
+                        offset = update["update_id"] + 1
+                        msg = update.get("message") or update.get("edited_message")
+                        if msg:
+                            db = database.SessionLocal()
+                            try:
+                                handle_telegram_incoming_message(msg, db)
+                            except Exception as ex:
+                                logger.error(f"[Telegram Polling] Error handling message: {ex}")
+                            finally:
+                                db.close()
+            elif resp.status_code == 409:
+                # 409 Conflict: A webhook is active or another instance is polling
+                time.sleep(10)
+            else:
+                time.sleep(3)
+        except Exception as e:
+            time.sleep(5)
+
+
+def start_telegram_polling_thread():
+    """
+    Launches the Telegram polling worker in a background daemon thread.
+    """
+    if not getattr(settings, "telegram_bot_token", None):
+        return
+    thread = threading.Thread(target=telegram_polling_worker, daemon=True, name="TelegramPollingWorker")
+    thread.start()
+    logger.info("[Telegram Polling] Thread launched.")
 
 
 # ============================================================

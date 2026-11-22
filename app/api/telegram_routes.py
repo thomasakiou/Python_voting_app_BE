@@ -10,18 +10,12 @@ from typing import Optional
 
 from ..core import database
 from ..core.config import settings
+from ..core.otp_utils import normalize_nigerian_phone, send_otp_telegram
 from ..domain import user as user_models
-from ..core.otp_utils import send_otp_telegram
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix=f"{settings.api_prefix}/telegram", tags=["Telegram Bot"])
-
-
-class TelegramManualLinkRequest(BaseModel):
-    username: str
-    chat_id: str
-    telegram_username: Optional[str] = None
 
 
 class TelegramTestSendRequest(BaseModel):
@@ -30,12 +24,26 @@ class TelegramTestSendRequest(BaseModel):
 
 
 # ============================================================
-# HELPER: Process incoming message from Webhook or Polling
+# HELPER: Normalize phone digits for matching
+# ============================================================
+def _extract_last_10_digits(phone: str) -> str | None:
+    """Extract the last 10 significant digits from a phone number for matching."""
+    digits = "".join(ch for ch in str(phone) if ch.isdigit())
+    if len(digits) < 10:
+        return None
+    return digits[-10:]
+
+
+# ============================================================
+# CORE MESSAGE HANDLER (Webhook + Polling)
 # ============================================================
 def handle_telegram_incoming_message(message: dict, db: Session):
     """
-    Core message processor used by both Webhook and Background Polling.
-    Handles /start MCS_<username>, /link <username>, and /status.
+    Phone-number-only linking system.
+    - /start  → shows the "Share Phone Number" button
+    - Contact → matches phone against registered voters, one-time link only
+    - /status → check link status
+    All other commands are ignored.
     """
     if not message:
         return
@@ -57,167 +65,201 @@ def handle_telegram_incoming_message(message: dict, db: Session):
         if reply_markup:
             payload["reply_markup"] = reply_markup
         try:
-            requests.post(
-                url,
-                json=payload,
-                timeout=10,
-            )
+            requests.post(url, json=payload, timeout=10)
         except Exception as e:
             logger.error(f"Error sending Telegram reply: {e}")
 
-    # Handle Contact Sharing (User taps "Share Contact" button)
+    # ── 1. CONTACT SHARING (Phone-number verification & one-time link) ──
     contact = message.get("contact")
     if contact:
-        raw_phone = contact.get("phone_number", "")
-        clean_digits = "".join(ch for ch in str(raw_phone) if ch.isdigit())
-        if len(clean_digits) >= 10:
-            suffix = clean_digits[-10:]
-            user = (
-                db.query(user_models.User)
-                .filter(user_models.User.phone.like(f"%{suffix}"))
-                .first()
-            )
-            if user:
-                user.telegram_chat_id = chat_id
-                user.telegram_username = f"@{tg_username}" if not tg_username.startswith("@") else tg_username
-                db.commit()
-
-                reply_tg(
-                    f"✅ *Phone Number Verified & Linked!*\n\n"
-                    f"Hello *{user.full_name}*,\n"
-                    f"Your Telegram account has been linked to your NECO MCS Voter ID: *{user.username}* (Phone: `{user.phone}`).\n\n"
-                    f"You will now receive all your *Election OTPs* and verification codes instantly right here.\n\n"
-                    f"🏛️ _NECO MCS Electoral Committee (ELECO)_",
-                    reply_markup={"remove_keyboard": True},
-                )
-                logger.info(f"Linked voter '{user.username}' via phone number '{raw_phone}' to Telegram chat_id '{chat_id}'")
-                return
-            else:
-                reply_tg(
-                    f"❌ *Phone Number Not Registered*\n\n"
-                    f"The phone number you shared does not match any registered voter in the NECO MCS Electoral System.\n\n"
-                    f"⚠️ Only voters whose phone numbers are registered on the official NECO MCS voters roll can link their Telegram accounts.\n\n"
-                    f"If you believe this is an error, please contact the Electoral Committee (ELECO).",
-                    reply_markup={"remove_keyboard": True},
-                )
-                return
-
-    # Handle /start with deep link parameter (e.g. /start MCS_1072)
-    if text.startswith("/start"):
-        parts = text.split()
-        if len(parts) > 1:
-            payload = parts[1].strip()
-            # Normalize payload (support MCS_1072, LINK_1072, or bare 1072)
-            target_username = payload
-            for prefix in ("MCS_", "LINK_", "mcs_", "link_"):
-                if target_username.startswith(prefix):
-                    target_username = target_username[len(prefix):]
-                    break
-
-            # Look up user by username
-            user = (
-                db.query(user_models.User)
-                .filter(func.lower(user_models.User.username) == target_username.lower())
-                .first()
-            )
-
-            if user:
-                user.telegram_chat_id = chat_id
-                user.telegram_username = f"@{tg_username}" if not tg_username.startswith("@") else tg_username
-                db.commit()
-
-                reply_tg(
-                    f"✅ *Telegram Successfully Linked!*\n\n"
-                    f"Hello *{user.full_name}*,\n"
-                    f"Your Telegram account has been linked to your NECO MCS Voter ID: *{user.username}*.\n\n"
-                    f"You will now receive all your *Election OTPs*, accreditation codes, and voting notifications instantly right here.\n\n"
-                    f"🏛️ _NECO MCS Electoral Committee (ELECO)_",
-                    reply_markup={"remove_keyboard": True},
-                )
-                logger.info(f"Linked voter '{user.username}' ({user.full_name}) to Telegram chat_id '{chat_id}'")
-            else:
-                reply_tg(
-                    f"⚠️ *Voter Not Found*\n\n"
-                    f"Could not find a voter record for MCS number `{target_username}`. "
-                    f"Please verify your 4-digit MCS number on the election portal.",
-                    reply_markup={"remove_keyboard": True},
-                )
-        else:
-            # Bare /start command: show friendly instructions and phone share button!
-            keyboard = {
-                "keyboard": [
-                    [
-                        {
-                            "text": "📱 Tap to Link with My Phone Number",
-                            "request_contact": True,
-                        }
-                    ]
-                ],
-                "resize_keyboard": True,
-                "one_time_keyboard": True,
-            }
+        # Security: Telegram only allows sharing your OWN contact via request_contact.
+        # The from.id must match the contact.user_id to prove ownership.
+        contact_user_id = contact.get("user_id")
+        sender_id = from_user.get("id")
+        if contact_user_id and sender_id and str(contact_user_id) != str(sender_id):
             reply_tg(
-                f"🗳️ *Welcome to the NECO MCS Election OTP Bot!*\n\n"
-                f"To receive your Election OTPs here instantly:\n\n"
-                f"1. Tap the *'📱 Tap to Link with My Phone Number'* button below\n"
-                f"OR\n"
-                f"2. Send your MCS number: `/link YOUR_MCS_NUMBER`\n"
-                f"   (Example: `/link 2668`)",
-                reply_markup=keyboard,
+                "🚫 *Security Violation*\n\n"
+                "You can only share your *own* phone number, not someone else's contact.\n\n"
+                "Please tap the *'📱 Share My Phone Number'* button to share your own verified number.",
+                reply_markup={"remove_keyboard": True},
             )
-
-    # Handle /link <username>
-    elif text.startswith("/link"):
-        parts = text.split()
-        if len(parts) > 1:
-            target_username = parts[1].strip()
-            user = (
-                db.query(user_models.User)
-                .filter(func.lower(user_models.User.username) == target_username.lower())
-                .first()
+            logger.warning(
+                f"[Telegram] User {sender_id} tried to share contact of user {contact_user_id} — blocked."
             )
-            if user:
-                user.telegram_chat_id = chat_id
-                user.telegram_username = f"@{tg_username}" if not tg_username.startswith("@") else tg_username
-                db.commit()
+            return
 
-                reply_tg(
-                    f"✅ *Linked Successfully!*\n\n"
-                    f"Connected to voter: *{user.full_name}* (MCS: `{user.username}`).\n"
-                    f"You will now receive your voting verification OTPs here.",
-                    reply_markup={"remove_keyboard": True},
-                )
-            else:
-                reply_tg(
-                    f"❌ No registered voter found with MCS number: `{target_username}`.",
-                    reply_markup={"remove_keyboard": True},
-                )
-        else:
-            reply_tg("Please provide your MCS number. Example: `/link 1072`")
+        raw_phone = contact.get("phone_number", "")
+        shared_suffix = _extract_last_10_digits(raw_phone)
 
-    # Handle /status
-    elif text.startswith("/status"):
-        user = db.query(user_models.User).filter(user_models.User.telegram_chat_id == chat_id).first()
+        if not shared_suffix:
+            reply_tg(
+                "❌ *Invalid Phone Number*\n\n"
+                "The phone number shared could not be processed. Please try again.",
+                reply_markup={"remove_keyboard": True},
+            )
+            return
+
+        # Check if this Telegram account is already linked to a voter
+        already_linked = (
+            db.query(user_models.User)
+            .filter(user_models.User.telegram_chat_id == chat_id)
+            .first()
+        )
+        if already_linked:
+            reply_tg(
+                f"⚠️ *Already Linked*\n\n"
+                f"Your Telegram account is already linked to voter *{already_linked.full_name}* "
+                f"(MCS: `{already_linked.username}`).\n\n"
+                f"Each Telegram account can only be linked once. "
+                f"If you need to change your linked account, please contact the Electoral Committee (ELECO).",
+                reply_markup={"remove_keyboard": True},
+            )
+            return
+
+        # Find voter by matching the last 10 digits of the phone number
+        all_voters = (
+            db.query(user_models.User)
+            .filter(user_models.User.phone.isnot(None))
+            .all()
+        )
+        matched_voter = None
+        for voter in all_voters:
+            voter_suffix = _extract_last_10_digits(voter.phone)
+            if voter_suffix and voter_suffix == shared_suffix:
+                matched_voter = voter
+                break
+
+        if not matched_voter:
+            reply_tg(
+                "❌ *Phone Number Not Registered*\n\n"
+                "The phone number you shared does not match any registered voter "
+                "in the NECO MCS Electoral System.\n\n"
+                "⚠️ Only voters whose phone numbers are registered on the official "
+                "NECO MCS voters roll can link their Telegram accounts.\n\n"
+                "If you believe this is an error, please contact the Electoral Committee (ELECO).",
+                reply_markup={"remove_keyboard": True},
+            )
+            logger.info(f"[Telegram] Phone '{raw_phone}' not found in voters roll. chat_id={chat_id}")
+            return
+
+        # Check if this voter's account is already linked to a DIFFERENT Telegram
+        if matched_voter.telegram_chat_id and matched_voter.telegram_chat_id != chat_id:
+            reply_tg(
+                "🚫 *Account Already Linked*\n\n"
+                "This voter account is already linked to a different Telegram account.\n\n"
+                "Each voter can only link their Telegram *once*. "
+                "If you believe this is an error, please contact the Electoral Committee (ELECO).",
+                reply_markup={"remove_keyboard": True},
+            )
+            logger.warning(
+                f"[Telegram] Voter '{matched_voter.username}' already linked to chat_id "
+                f"'{matched_voter.telegram_chat_id}', rejected re-link attempt from chat_id '{chat_id}'."
+            )
+            return
+
+        # ✅ Phone matched & not yet linked → link now
+        matched_voter.telegram_chat_id = chat_id
+        matched_voter.telegram_username = (
+            f"@{tg_username}" if not tg_username.startswith("@") else tg_username
+        )
+        db.commit()
+
+        reply_tg(
+            f"✅ *Phone Number Verified & Linked!*\n\n"
+            f"Hello *{matched_voter.full_name}*,\n"
+            f"Your Telegram account has been securely linked to your NECO MCS Voter ID: "
+            f"*{matched_voter.username}*.\n\n"
+            f"You will now receive all your *Election OTPs* and verification codes "
+            f"instantly right here.\n\n"
+            f"🔒 _This link is permanent and cannot be changed without ELECO approval._\n\n"
+            f"🏛️ _NECO MCS Electoral Committee (ELECO)_",
+            reply_markup={"remove_keyboard": True},
+        )
+        logger.info(
+            f"[Telegram] Linked voter '{matched_voter.username}' ({matched_voter.full_name}) "
+            f"via phone match to chat_id '{chat_id}'."
+        )
+        return
+
+    # ── 2. /start COMMAND → Show phone share button ──
+    if text.startswith("/start"):
+        # Check if already linked
+        already_linked = (
+            db.query(user_models.User)
+            .filter(user_models.User.telegram_chat_id == chat_id)
+            .first()
+        )
+        if already_linked:
+            reply_tg(
+                f"ℹ️ *Already Connected*\n\n"
+                f"Your Telegram is linked to voter *{already_linked.full_name}* "
+                f"(MCS: `{already_linked.username}`).\n\n"
+                f"You will receive all OTPs and election notifications here automatically.",
+                reply_markup={"remove_keyboard": True},
+            )
+            return
+
+        keyboard = {
+            "keyboard": [
+                [
+                    {
+                        "text": "📱 Share My Phone Number",
+                        "request_contact": True,
+                    }
+                ]
+            ],
+            "resize_keyboard": True,
+            "one_time_keyboard": True,
+        }
+        reply_tg(
+            "🗳️ *Welcome to the NECO MCS Election OTP Bot!*\n\n"
+            "To receive your Election OTPs here, we need to verify your identity "
+            "using your *registered phone number*.\n\n"
+            "👇 Tap the button below to securely share your phone number:\n\n"
+            "🔒 _Your phone number will be matched against the official NECO MCS "
+            "voters roll. Only registered voters can link their accounts._",
+            reply_markup=keyboard,
+        )
+        return
+
+    # ── 3. /status COMMAND → Check link status ──
+    if text.startswith("/status"):
+        user = (
+            db.query(user_models.User)
+            .filter(user_models.User.telegram_chat_id == chat_id)
+            .first()
+        )
         if user:
             reply_tg(
-                f"ℹ️ *Status: Connected*\n\n"
+                f"ℹ️ *Status: Connected* ✅\n\n"
                 f"Voter: *{user.full_name}*\n"
                 f"MCS Number: `{user.username}`\n"
                 f"Station: {user.staff_station or 'N/A'}\n"
-                f"Accredited: {'Yes ✅' if user.is_accredited else 'Pending ⏳'}"
+                f"Accredited: {'Yes ✅' if user.is_accredited else 'Pending ⏳'}",
             )
         else:
-            reply_tg("❌ Your Telegram account is not yet linked to any voter. Send `/link YOUR_MCS_NUMBER` to connect.")
+            reply_tg(
+                "❌ *Not Connected*\n\n"
+                "Your Telegram account is not linked to any voter.\n\n"
+                "Send /start to begin the phone verification process.",
+            )
+        return
+
+    # ── 4. Any other text → Inform user ──
+    reply_tg(
+        "ℹ️ This bot only supports phone-number-based linking.\n\n"
+        "Available commands:\n"
+        "• /start — Begin phone verification\n"
+        "• /status — Check your link status",
+    )
 
 
 # ============================================================
-# 1. TELEGRAM WEBHOOK (Receives events from Telegram Bot API)
+# TELEGRAM WEBHOOK ENDPOINT
 # ============================================================
 @router.post("/webhook")
 async def telegram_webhook(request: Request, db: Session = Depends(database.get_db)):
-    """
-    Webhook called by Telegram when a user interacts with the bot.
-    """
+    """Webhook called by Telegram when a user interacts with the bot."""
     try:
         data = await request.json()
     except Exception:
@@ -231,7 +273,7 @@ async def telegram_webhook(request: Request, db: Session = Depends(database.get_
 
 
 # ============================================================
-# BACKGROUND LONG-POLLING WORKER (Self-healing fallback)
+# BACKGROUND LONG-POLLING WORKER
 # ============================================================
 def telegram_polling_worker():
     """
@@ -246,15 +288,20 @@ def telegram_polling_worker():
     logger.info("[Telegram Polling] Starting Telegram background polling worker...")
     offset = None
 
-    # Check if a failing webhook is registered; clear it so getUpdates succeeds
+    # Clear any failing webhook so getUpdates works
     try:
-        info_resp = requests.get(f"https://api.telegram.org/bot{bot_token}/getWebhookInfo", timeout=10).json()
+        info_resp = requests.get(
+            f"https://api.telegram.org/bot{bot_token}/getWebhookInfo", timeout=10
+        ).json()
         if info_resp.get("ok"):
             hook_url = info_resp.get("result", {}).get("url")
             last_err = info_resp.get("result", {}).get("last_error_message")
             if hook_url and last_err:
                 logger.warning(f"[Telegram Polling] Clearing failing webhook '{hook_url}' ({last_err})")
-                requests.get(f"https://api.telegram.org/bot{bot_token}/deleteWebhook?drop_pending_updates=False", timeout=10)
+                requests.get(
+                    f"https://api.telegram.org/bot{bot_token}/deleteWebhook?drop_pending_updates=False",
+                    timeout=10,
+                )
     except Exception as e:
         logger.warning(f"[Telegram Polling] Could not check webhook info: {e}")
 
@@ -284,18 +331,15 @@ def telegram_polling_worker():
                             finally:
                                 db.close()
             elif resp.status_code == 409:
-                # 409 Conflict: A webhook is active or another instance is polling
                 time.sleep(10)
             else:
                 time.sleep(3)
-        except Exception as e:
+        except Exception:
             time.sleep(5)
 
 
 def start_telegram_polling_thread():
-    """
-    Launches the Telegram polling worker in a background daemon thread.
-    """
+    """Launches the Telegram polling worker in a background daemon thread."""
     if not getattr(settings, "telegram_bot_token", None):
         return
     thread = threading.Thread(target=telegram_polling_worker, daemon=True, name="TelegramPollingWorker")
@@ -304,13 +348,11 @@ def start_telegram_polling_thread():
 
 
 # ============================================================
-# 2. GET TELEGRAM LINK INFO & DEEP LINK FOR A VOTER
+# GET TELEGRAM LINK INFO FOR A VOTER
 # ============================================================
 @router.get("/link-info/{username}")
 def get_telegram_link_info(username: str, db: Session = Depends(database.get_db)):
-    """
-    Returns the one-click Telegram deep link and current link status for a voter.
-    """
+    """Returns the Telegram bot link and current link status for a voter."""
     cleaned = username.strip()
     user = (
         db.query(user_models.User)
@@ -324,7 +366,8 @@ def get_telegram_link_info(username: str, db: Session = Depends(database.get_db)
         )
 
     bot_username = getattr(settings, "telegram_bot_username", "NECOMCSVotingOTPBot") or "NECOMCSVotingOTPBot"
-    deep_link = f"https://t.me/{bot_username}?start=MCS_{user.username}"
+    # No deep link parameter — voters link via phone number only
+    deep_link = f"https://t.me/{bot_username}"
 
     return {
         "username": user.username,
@@ -337,49 +380,14 @@ def get_telegram_link_info(username: str, db: Session = Depends(database.get_db)
 
 
 # ============================================================
-# 3. MANUAL LINK (For Admin or Direct API setup)
-# ============================================================
-@router.post("/manual-link")
-def manual_link_telegram(
-    payload: TelegramManualLinkRequest,
-    db: Session = Depends(database.get_db),
-):
-    """
-    Manually link a voter's account with a Telegram chat ID.
-    """
-    user = (
-        db.query(user_models.User)
-        .filter(func.lower(user_models.User.username) == payload.username.strip().lower())
-        .first()
-    )
-    if not user:
-        raise HTTPException(status_code=404, detail="Voter not found.")
-
-    user.telegram_chat_id = payload.chat_id.strip()
-    if payload.telegram_username:
-        user.telegram_username = payload.telegram_username.strip()
-    db.commit()
-
-    return {
-        "message": f"Successfully linked voter '{user.username}' to Telegram chat_id '{user.telegram_chat_id}'.",
-        "username": user.username,
-        "full_name": user.full_name,
-        "telegram_chat_id": user.telegram_chat_id,
-        "telegram_username": user.telegram_username,
-    }
-
-
-# ============================================================
-# 4. TEST DISPATCH OTP VIA TELEGRAM
+# TEST DISPATCH OTP VIA TELEGRAM
 # ============================================================
 @router.post("/test-send")
 def test_send_telegram(
     payload: TelegramTestSendRequest,
     db: Session = Depends(database.get_db),
 ):
-    """
-    Test sending a sample OTP message to a voter's linked Telegram chat.
-    """
+    """Test sending a sample OTP message to a voter's linked Telegram chat."""
     user = (
         db.query(user_models.User)
         .filter(func.lower(user_models.User.username) == payload.username.strip().lower())
@@ -392,7 +400,8 @@ def test_send_telegram(
         bot_username = getattr(settings, "telegram_bot_username", "NECOMCSVotingOTPBot") or "NECOMCSVotingOTPBot"
         raise HTTPException(
             status_code=400,
-            detail=f"Voter '{user.username}' has not linked Telegram yet. Click https://t.me/{bot_username}?start=MCS_{user.username} first.",
+            detail=f"Voter '{user.username}' has not linked Telegram yet. "
+                   f"Open https://t.me/{bot_username} and share your phone number to link.",
         )
 
     sent = send_otp_telegram(

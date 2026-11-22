@@ -117,3 +117,8 @@ class UserStatsOut(BaseModel):
 
 class BulkDeleteUsersRequest(BaseModel):
     user_ids: List[int]
+
+
+class BulkUnaccreditUsersRequest(BaseModel):
+    user_ids: Optional[List[int]] = None
+    all_accredited: Optional[bool] = False

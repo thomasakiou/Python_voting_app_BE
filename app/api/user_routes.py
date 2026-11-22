@@ -4,7 +4,10 @@ from sqlalchemy import func, or_
 from typing import Optional, List
 import io
 import csv
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from ..core import database, oauth2, utils
 from ..schemas import user as schemas
@@ -847,6 +850,91 @@ def bulk_delete_users(
         admin_id=current_user.id,
     )
     return {"deleted_count": deleted_count, "message": f"Successfully deleted {deleted_count} user(s)."}
+
+
+# ============================================================
+# BULK UNACCREDIT / REVERSE ACCREDITATION FOR VOTERS
+# ============================================================
+@router.post("/bulk-unaccredit")
+def bulk_unaccredit_voters(
+    payload: schemas.BulkUnaccreditUsersRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(oauth2.role_required(["super-admin", "admin"])),
+):
+    """
+    Bulk reverse accreditation for voters to allow them to re-accredit.
+    Protects voters who have already cast a vote from having their accreditation reversed.
+    """
+    if payload.all_accredited:
+        voters = db.query(User).filter(
+            User.role == "voter",
+            User.is_accredited == True,
+        ).all()
+    elif payload.user_ids:
+        voters = db.query(User).filter(
+            User.id.in_(payload.user_ids),
+            User.role == "voter",
+            User.is_accredited == True,
+        ).all()
+    else:
+        return {"unaccredited_count": 0, "skipped_count": 0, "message": "No voters selected for unaccreditation."}
+
+    if not voters:
+        return {"unaccredited_count": 0, "skipped_count": 0, "message": "No accredited voters found among the selection."}
+
+    # Identify voters who have already voted
+    voter_ids = [v.id for v in voters]
+    voted_user_ids = {
+        row[0] for row in db.query(Vote.user_id).filter(Vote.user_id.in_(voter_ids)).all()
+    }
+
+    unaccredited_count = 0
+    skipped_voters = []
+
+    for voter in voters:
+        if voter.id in voted_user_ids:
+            skipped_voters.append(f"{voter.username} ({voter.full_name})")
+            continue
+
+        # Invalidate prior accreditation OTPs
+        db.query(otp_models.OTP).filter(
+            otp_models.OTP.user_id == voter.id,
+            otp_models.OTP.purpose == "accreditation",
+        ).update({"is_used": True})
+
+        voter.is_accredited = False
+        voter.accredited_at = None
+        voter.accredited_device_id = None
+        voter.device_info = None
+        unaccredited_count += 1
+
+    db.commit()
+    cache.delete("voter_analysis")
+    cache.invalidate_prefix("all_users_list")
+
+    try:
+        record_audit_log(
+            db=db,
+            admin_username=current_user.username,
+            action="BULK_REVERSE_ACCREDITATION",
+            target_type="VOTER",
+            target_id=f"count:{unaccredited_count}",
+            details=f"Admin '{current_user.username}' bulk reversed accreditation for {unaccredited_count} voter(s). Skipped {len(skipped_voters)} who already voted.",
+            admin_id=current_user.id,
+        )
+    except Exception as e:
+        logger.warning(f"Could not record bulk unaccredit audit log: {e}")
+
+    msg = f"Successfully reversed accreditation for {unaccredited_count} voter(s)."
+    if skipped_voters:
+        msg += f" Note: {len(skipped_voters)} voter(s) were skipped because they have already cast votes."
+
+    return {
+        "unaccredited_count": unaccredited_count,
+        "skipped_count": len(skipped_voters),
+        "skipped_voters": skipped_voters,
+        "message": msg,
+    }
 
 
 # ============================================================

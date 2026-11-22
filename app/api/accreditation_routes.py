@@ -11,6 +11,7 @@ from ..core.otp_utils import (
     get_otp_expiry,
     send_otp_email,
     send_otp_sms,
+    send_otp_telegram,
     mask_email,
     mask_phone,
 )
@@ -205,6 +206,16 @@ def send_accreditation_otp(
         )
         destinations.append(f"phone ({mask_phone(registered_phone)})")
 
+    if user.telegram_chat_id:
+        background_tasks.add_task(
+            send_otp_telegram,
+            chat_id=user.telegram_chat_id,
+            otp_code=otp_code,
+            full_name=user.full_name,
+            purpose_label="Accreditation",
+        )
+        destinations.append(f"Telegram ({user.telegram_username or 'Connected'})")
+
     dest_str = " and ".join(destinations) if destinations else "contact address"
     masked_e = mask_email(registered_email) if registered_email else None
     masked_p = mask_phone(registered_phone) if registered_phone else None
@@ -215,6 +226,8 @@ def send_accreditation_otp(
         "expires_in_minutes": settings.otp_expire_minutes,
         "masked_email": masked_e,
         "masked_phone": masked_p,
+        "has_telegram": bool(user.telegram_chat_id),
+        "telegram_username": user.telegram_username,
     }
 
 

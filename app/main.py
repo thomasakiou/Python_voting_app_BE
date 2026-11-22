@@ -13,6 +13,7 @@ from .api import (
     audit_log_routes as audit_logs,
     voter_contact_routes as voter_contact,
     portal_lock_routes as portal_locks,
+    telegram_routes as telegram,
 )
 from .api.auth import otp_login, admin_login, logout
 from .domain import user as models
@@ -47,6 +48,8 @@ def auto_upgrade_schema():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_rank VARCHAR(150);",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_conraiss VARCHAR(50);",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_active BOOLEAN DEFAULT TRUE;",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_chat_id VARCHAR(100);",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_username VARCHAR(100);",
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS is_disqualified BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE candidates ADD COLUMN IF NOT EXISTS image_url TEXT;",
@@ -227,3 +230,4 @@ app.include_router(voting_time.router)
 app.include_router(audit_logs.router)
 app.include_router(voter_contact.router)
 app.include_router(portal_locks.router)
+app.include_router(telegram.router)

@@ -33,4 +33,8 @@ class User(Base):
     staff_conraiss = Column(String(50), nullable=True)
     staff_active = Column(Boolean, default=True, nullable=False, server_default=text('true'))
 
+    # Telegram Delivery Fields
+    telegram_chat_id = Column(String(100), nullable=True)
+    telegram_username = Column(String(100), nullable=True)
+
     votes = relationship("Vote", back_populates="user")

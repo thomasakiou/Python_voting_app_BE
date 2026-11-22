@@ -7,7 +7,7 @@ import logging
 
 from ..core import database, oauth2
 from ..core.config import settings
-from ..core.otp_utils import generate_otp, get_otp_expiry, send_otp_email, send_otp_sms, mask_email, mask_phone
+from ..core.otp_utils import generate_otp, get_otp_expiry, send_otp_email, send_otp_sms, send_otp_telegram, mask_email, mask_phone
 from ..core.audit import record_audit_log
 from ..core.cache import cache
 from ..domain import user as user_models
@@ -228,6 +228,16 @@ def send_contact_otp(
         )
         destinations.append(f"phone ({mask_phone(target_phone)})")
 
+    if user.telegram_chat_id:
+        background_tasks.add_task(
+            send_otp_telegram,
+            chat_id=user.telegram_chat_id,
+            otp_code=otp_code,
+            full_name=user.full_name,
+            purpose_label="Contact Verification",
+        )
+        destinations.append(f"Telegram ({user.telegram_username or 'Connected'})")
+
     dest_str = " and ".join(destinations) if destinations else "contact address"
 
     return {
@@ -235,6 +245,8 @@ def send_contact_otp(
         "otp_sent": True,
         "masked_email": mask_email(target_email) if target_email else None,
         "masked_phone": mask_phone(target_phone) if target_phone else None,
+        "has_telegram": bool(user.telegram_chat_id),
+        "telegram_username": user.telegram_username,
         "expires_in_minutes": settings.otp_expire_minutes,
     }
 

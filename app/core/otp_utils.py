@@ -216,3 +216,54 @@ def send_otp_sms(
         return True
 
     return False
+
+
+# ============================================================
+# TELEGRAM BOT DELIVERY
+# ============================================================
+
+def send_otp_telegram(
+    chat_id: str,
+    otp_code: str,
+    full_name: str,
+    purpose_label: str = "Verification"
+) -> bool:
+    """Send OTP directly to a voter's linked Telegram chat."""
+    if not chat_id:
+        return False
+
+    bot_token = getattr(settings, "telegram_bot_token", None) or os.getenv("TELEGRAM_BOT_TOKEN")
+    if not bot_token:
+        logger.warning("Telegram Bot Token not configured – logging for simulation.")
+        print(f"\n========================================\n[TELEGRAM OTP SIMULATION]\nChat ID: {chat_id}\nVoter: {full_name}\nPurpose: {purpose_label}\nCode: {otp_code}\n========================================\n")
+        return True
+
+    text = (
+        f"🗳️ *NECO MCS Election Verification*\n\n"
+        f"Hello *{full_name}*,\n\n"
+        f"Your One-Time Password (OTP) for *{purpose_label}* is:\n\n"
+        f"👉 `{otp_code}` 👈\n\n"
+        f"⏳ _Valid for {settings.otp_expire_minutes} minutes._\n"
+        f"⚠️ _Strictly confidential. Do not share this code with anyone._\n\n"
+        f"🏛️ _NECO MCS Secure Electronic Voting System_"
+    )
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "Markdown",
+    }
+
+    try:
+        resp = requests.post(url, json=payload, timeout=10)
+        if resp.status_code == 200:
+            logger.info(f"Telegram OTP delivered successfully to chat_id {chat_id}")
+            return True
+        else:
+            logger.error(f"Telegram Bot API failed (HTTP {resp.status_code}): {resp.text}")
+            return False
+    except Exception as e:
+        logger.error(f"Error calling Telegram Bot API: {e}")
+        return False
+

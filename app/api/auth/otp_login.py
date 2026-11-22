@@ -10,6 +10,7 @@ from ...core.otp_utils import (
     get_otp_expiry,
     send_otp_email,
     send_otp_sms,
+    send_otp_telegram,
     mask_email,
     mask_phone,
 )
@@ -150,6 +151,16 @@ def initiate_login(
         )
         destinations.append(f"phone ({mask_phone(user.phone)})")
 
+    if user.telegram_chat_id:
+        background_tasks.add_task(
+            send_otp_telegram,
+            chat_id=user.telegram_chat_id,
+            otp_code=otp_code,
+            full_name=user.full_name,
+            purpose_label="Voting Login",
+        )
+        destinations.append(f"Telegram ({user.telegram_username or 'Connected'})")
+
     dest_str = " and ".join(destinations) if destinations else "contact address"
 
     return {
@@ -159,6 +170,8 @@ def initiate_login(
         "masked_phone": mask_phone(user.phone) if has_phone else None,
         "has_email": has_email,
         "has_phone": has_phone,
+        "has_telegram": bool(user.telegram_chat_id),
+        "telegram_username": user.telegram_username,
         "username": user.username,
         "full_name": user.full_name,
         "staff_file_no": user.staff_file_no,

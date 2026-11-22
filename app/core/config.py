@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     telegram_bot_username: str = "NECOMCSVotingOTPBot"
 
     # OTP settings
-    otp_expire_minutes: int = 10
+    otp_expire_minutes: int = 1
 
     class Config:
         env_file = ".env"

@@ -90,6 +90,7 @@ def send_otp_email(
         logger.warning("No email address provided – skipping email OTP delivery.")
         return False
 
+    expiry_label = "1 minute" if settings.otp_expire_minutes == 1 else f"{settings.otp_expire_minutes} minutes"
     html_body = f"""
     <html>
       <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; max-width: 600px; margin: auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
@@ -102,7 +103,7 @@ def send_otp_email(
         <div style="background:#eef2ff; border: 2px dashed #6366f1; padding: 20px; margin: 24px 0; border-radius: 8px; text-align: center;">
           <span style="font-family: monospace; font-size: 32px; letter-spacing: 12px; font-weight: 700; color: #4338ca;">{otp_code}</span>
         </div>
-        <p>This OTP is strictly confidential and is valid for <strong>{settings.otp_expire_minutes} minutes</strong>.</p>
+        <p>This OTP is strictly confidential and is valid for <strong>{expiry_label}</strong>.</p>
         <p style="color: #dc2626; font-size: 13px; font-weight: 500;">Do not share this code with anyone. Election officials will never ask for your OTP.</p>
         <hr style="border: none; border-top: 1px solid #e2e8f0; margin-top: 32px;">
         <p style="color: #94a3b8; font-size: 12px; text-align: center;">NECO MCS Secure Electronic Voting System</p>
@@ -165,7 +166,8 @@ def send_otp_sms(
     termii_api_key = getattr(settings, "termii_api_key", None) or os.getenv("TERMII_API_KEY")
     if termii_api_key:
         sender_id = getattr(settings, "termii_sender_id", "NECOMCSVOTE") or "NECOMCSVOTE"
-        message_text = f"Your NECO MCS OTP for {purpose_label} is: {otp_code}. It is valid for {settings.otp_expire_minutes} minutes. Do not share this code."
+        sms_expiry = "1 minute" if settings.otp_expire_minutes == 1 else f"{settings.otp_expire_minutes} minutes"
+        message_text = f"Your NECO MCS OTP for {purpose_label} is: {otp_code}. It is valid for {sms_expiry}. Do not share this code."
         
         url = getattr(settings, "termii_url", "https://api.ng.termii.com/api/sms/send")
         payload = {
@@ -200,8 +202,9 @@ def send_otp_sms(
         try:
             from twilio.rest import Client
             client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
+            twilio_expiry = "1 minute" if settings.otp_expire_minutes == 1 else f"{settings.otp_expire_minutes} minutes"
             message = client.messages.create(
-                body=f"Your NECO MCS OTP is: {otp_code}. It expires in {settings.otp_expire_minutes} minutes. Do not share it.",
+                body=f"Your NECO MCS OTP is: {otp_code}. It expires in {twilio_expiry}. Do not share it.",
                 from_=settings.twilio_phone_number,
                 to=f"+{clean_phone}" if not clean_phone.startswith("+") else clean_phone,
             )
@@ -238,12 +241,13 @@ def send_otp_telegram(
         print(f"\n========================================\n[TELEGRAM OTP SIMULATION]\nChat ID: {chat_id}\nVoter: {full_name}\nPurpose: {purpose_label}\nCode: {otp_code}\n========================================\n")
         return True
 
+    expiry_text = "1 minute (60 seconds)" if settings.otp_expire_minutes == 1 else f"{settings.otp_expire_minutes} minutes"
     text = (
         f"🗳️ *NECO MCS Election Verification*\n\n"
         f"Hello *{full_name}*,\n\n"
         f"Your One-Time Password (OTP) for *{purpose_label}* is:\n\n"
         f"👉 `{otp_code}` 👈\n\n"
-        f"⏳ _Valid for {settings.otp_expire_minutes} minutes._\n"
+        f"⏳ _Valid for {expiry_text}._\n"
         f"⚠️ _Strictly confidential. Do not share this code with anyone._\n\n"
         f"🏛️ _NECO MCS Secure Electronic Voting System_"
     )

@@ -48,19 +48,59 @@ def handle_telegram_incoming_message(message: dict, db: Session):
 
     bot_token = getattr(settings, "telegram_bot_token", None)
 
-    def reply_tg(reply_text: str):
+    def reply_tg(reply_text: str, reply_markup: dict = None):
         if not bot_token:
             logger.info(f"[SIMULATED TG REPLY to {chat_id}]: {reply_text}")
             return
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = {"chat_id": chat_id, "text": reply_text, "parse_mode": "Markdown"}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         try:
             requests.post(
                 url,
-                json={"chat_id": chat_id, "text": reply_text, "parse_mode": "Markdown"},
+                json=payload,
                 timeout=10,
             )
         except Exception as e:
             logger.error(f"Error sending Telegram reply: {e}")
+
+    # Handle Contact Sharing (User taps "Share Contact" button)
+    contact = message.get("contact")
+    if contact:
+        raw_phone = contact.get("phone_number", "")
+        clean_digits = "".join(ch for ch in str(raw_phone) if ch.isdigit())
+        if len(clean_digits) >= 10:
+            suffix = clean_digits[-10:]
+            user = (
+                db.query(user_models.User)
+                .filter(user_models.User.phone.like(f"%{suffix}"))
+                .first()
+            )
+            if user:
+                user.telegram_chat_id = chat_id
+                user.telegram_username = f"@{tg_username}" if not tg_username.startswith("@") else tg_username
+                db.commit()
+
+                reply_tg(
+                    f"✅ *Phone Number Verified & Linked!*\n\n"
+                    f"Hello *{user.full_name}*,\n"
+                    f"Your Telegram account has been linked to your NECO MCS Voter ID: *{user.username}* (Phone: `{user.phone}`).\n\n"
+                    f"You will now receive all your *Election OTPs* and verification codes instantly right here.\n\n"
+                    f"🏛️ _NECO MCS Electoral Committee (ELECO)_",
+                    reply_markup={"remove_keyboard": True},
+                )
+                logger.info(f"Linked voter '{user.username}' via phone number '{raw_phone}' to Telegram chat_id '{chat_id}'")
+                return
+            else:
+                reply_tg(
+                    f"⚠️ *Phone Number Not Found*\n\n"
+                    f"We could not find a registered voter with phone number ending in `...{suffix}`.\n\n"
+                    f"You can still link manually by sending your MCS number:\n"
+                    f"👉 `/link YOUR_MCS_NUMBER` (e.g. `/link 2668`)",
+                    reply_markup={"remove_keyboard": True},
+                )
+                return
 
     # Handle /start with deep link parameter (e.g. /start MCS_1072)
     if text.startswith("/start"):
@@ -91,24 +131,39 @@ def handle_telegram_incoming_message(message: dict, db: Session):
                     f"Hello *{user.full_name}*,\n"
                     f"Your Telegram account has been linked to your NECO MCS Voter ID: *{user.username}*.\n\n"
                     f"You will now receive all your *Election OTPs*, accreditation codes, and voting notifications instantly right here.\n\n"
-                    f"🏛️ _NECO MCS Electoral Committee (ELECO)_"
+                    f"🏛️ _NECO MCS Electoral Committee (ELECO)_",
+                    reply_markup={"remove_keyboard": True},
                 )
                 logger.info(f"Linked voter '{user.username}' ({user.full_name}) to Telegram chat_id '{chat_id}'")
             else:
                 reply_tg(
                     f"⚠️ *Voter Not Found*\n\n"
                     f"Could not find a voter record for MCS number `{target_username}`. "
-                    f"Please verify your 4-digit MCS number on the election portal."
+                    f"Please verify your 4-digit MCS number on the election portal.",
+                    reply_markup={"remove_keyboard": True},
                 )
         else:
-            # Bare /start command
+            # Bare /start command: show friendly instructions and phone share button!
+            keyboard = {
+                "keyboard": [
+                    [
+                        {
+                            "text": "📱 Tap to Link with My Phone Number",
+                            "request_contact": True,
+                        }
+                    ]
+                ],
+                "resize_keyboard": True,
+                "one_time_keyboard": True,
+            }
             reply_tg(
-                f"🗳️ *Welcome to the NECO MCS Election Bot!*\n\n"
-                f"To link your account and receive instant OTPs here:\n"
-                f"1. Log in to the NECO MCS Portal\n"
-                f"2. Click the *'Connect Telegram'* button on your screen.\n\n"
-                f"Alternatively, send: `/link YOUR_MCS_NUMBER`\n"
-                f"Example: `/link 1072`"
+                f"🗳️ *Welcome to the NECO MCS Election OTP Bot!*\n\n"
+                f"To receive your Election OTPs here instantly:\n\n"
+                f"1. Tap the *'📱 Tap to Link with My Phone Number'* button below\n"
+                f"OR\n"
+                f"2. Send your MCS number: `/link YOUR_MCS_NUMBER`\n"
+                f"   (Example: `/link 2668`)",
+                reply_markup=keyboard,
             )
 
     # Handle /link <username>
@@ -129,10 +184,14 @@ def handle_telegram_incoming_message(message: dict, db: Session):
                 reply_tg(
                     f"✅ *Linked Successfully!*\n\n"
                     f"Connected to voter: *{user.full_name}* (MCS: `{user.username}`).\n"
-                    f"You will now receive your voting verification OTPs here."
+                    f"You will now receive your voting verification OTPs here.",
+                    reply_markup={"remove_keyboard": True},
                 )
             else:
-                reply_tg(f"❌ No registered voter found with MCS number: `{target_username}`.")
+                reply_tg(
+                    f"❌ No registered voter found with MCS number: `{target_username}`.",
+                    reply_markup={"remove_keyboard": True},
+                )
         else:
             reply_tg("Please provide your MCS number. Example: `/link 1072`")
 

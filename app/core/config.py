@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     twilio_phone_number: str = ""
 
     # Telegram Bot settings
-    telegram_bot_token: str = ""
-    telegram_bot_username: str = "NECOMCSVotingBot"
+    telegram_bot_token: str = "9170128159:AAEMlsuYRIs3QEn_af-WTQInZgugLNJo2VM"
+    telegram_bot_username: str = "NECOMCSVotingOTPBot"
 
     # OTP settings
     otp_expire_minutes: int = 10

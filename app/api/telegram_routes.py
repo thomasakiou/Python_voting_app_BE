@@ -184,7 +184,7 @@ def get_telegram_link_info(username: str, db: Session = Depends(database.get_db)
             detail=f"Voter '{cleaned}' not found.",
         )
 
-    bot_username = getattr(settings, "telegram_bot_username", "NECOMCSVotingBot") or "NECOMCSVotingBot"
+    bot_username = getattr(settings, "telegram_bot_username", "NECOMCSVotingOTPBot") or "NECOMCSVotingOTPBot"
     deep_link = f"https://t.me/{bot_username}?start=MCS_{user.username}"
 
     return {
@@ -250,7 +250,7 @@ def test_send_telegram(
         raise HTTPException(status_code=404, detail="Voter not found.")
 
     if not user.telegram_chat_id:
-        bot_username = getattr(settings, "telegram_bot_username", "NECOMCSVotingBot") or "NECOMCSVotingBot"
+        bot_username = getattr(settings, "telegram_bot_username", "NECOMCSVotingOTPBot") or "NECOMCSVotingOTPBot"
         raise HTTPException(
             status_code=400,
             detail=f"Voter '{user.username}' has not linked Telegram yet. Click https://t.me/{bot_username}?start=MCS_{user.username} first.",

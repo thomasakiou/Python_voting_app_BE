@@ -276,16 +276,15 @@ def telegram_polling_worker():
     logger.info("[Telegram Polling] Starting Telegram background polling worker...")
     offset = None
 
-    # Clear any failing webhook so getUpdates works
+    # Clear any active webhook so getUpdates works reliably
     try:
         info_resp = requests.get(
             f"https://api.telegram.org/bot{bot_token}/getWebhookInfo", timeout=10
         ).json()
         if info_resp.get("ok"):
             hook_url = info_resp.get("result", {}).get("url")
-            last_err = info_resp.get("result", {}).get("last_error_message")
-            if hook_url and last_err:
-                logger.warning(f"[Telegram Polling] Clearing failing webhook '{hook_url}' ({last_err})")
+            if hook_url:
+                logger.warning(f"[Telegram Polling] Clearing active webhook '{hook_url}' to enable polling.")
                 requests.get(
                     f"https://api.telegram.org/bot{bot_token}/deleteWebhook?drop_pending_updates=False",
                     timeout=10,

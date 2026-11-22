@@ -94,10 +94,10 @@ def handle_telegram_incoming_message(message: dict, db: Session):
                 return
             else:
                 reply_tg(
-                    f"⚠️ *Phone Number Not Found*\n\n"
-                    f"We could not find a registered voter with phone number ending in `...{suffix}`.\n\n"
-                    f"You can still link manually by sending your MCS number:\n"
-                    f"👉 `/link YOUR_MCS_NUMBER` (e.g. `/link 2668`)",
+                    f"❌ *Phone Number Not Registered*\n\n"
+                    f"The phone number you shared does not match any registered voter in the NECO MCS Electoral System.\n\n"
+                    f"⚠️ Only voters whose phone numbers are registered on the official NECO MCS voters roll can link their Telegram accounts.\n\n"
+                    f"If you believe this is an error, please contact the Electoral Committee (ELECO).",
                     reply_markup={"remove_keyboard": True},
                 )
                 return
